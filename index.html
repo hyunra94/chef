@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=7" />
+  <link rel="stylesheet" href="./style.css?v=10" />
   <title>냉장고를 부탁해</title>
 </head>
 <body data-current-tab="fridge">
@@ -41,7 +41,7 @@
             <div>
               <span class="eyebrow">Ingredients DB</span>
               <h2>냉장고</h2>
-              <p class="muted">재료를 분류별로 모아보고, 수량·유통기한·메모를 관리합니다.</p>
+              <p class="muted">재료를 분류별로 모아보고, 보유/소진 상태와 유통기한·메모를 관리합니다.</p>
             </div>
             
           </div>
@@ -61,6 +61,7 @@
                 <button class="segment" type="button" data-filter="sub">서브</button>
                 <button class="segment" type="button" data-filter="sauce">소스</button>
               </div>
+              <button class="tiny-btn fridge-toggle" type="button" id="toggleConsumedBtn">소진 재료 보기</button>
             </div>
           </div>
 
@@ -105,6 +106,16 @@
                 <option selected>쉬움</option>
                 <option>보통</option>
                 <option>상관없음</option>
+              </select>
+            </label>
+            <label class="soft-field surface-inset">
+              <span>AI 선택</span>
+              <select id="aiProviderSelect">
+                <option value="openai" selected>ChatGPT</option>
+                <option value="anthropic">Claude</option>
+                <option value="gemini">Gemini</option>
+                <option value="all">3개 모두 비교</option>
+                <option value="local">로컬 추천</option>
               </select>
             </label>
           </div>
@@ -165,13 +176,17 @@
         <article class="card surface-raised settings-card">
           <span class="eyebrow">Settings</span>
           <h2>설정</h2>
-          <p class="muted">1차는 로컬 저장소를 사용하고, 이후 Worker와 Notion DB로 확장할 수 있게 열어두었습니다.</p>
+          <p class="muted">1차는 로컬 저장소를 사용하고, AI 키는 Cloudflare Worker 환경변수에 보관합니다. 앱에는 Worker URL만 저장합니다.</p>
 
           <div class="settings-list">
             <label class="soft-field surface-inset">
               <span>AI Worker URL</span>
               <input id="workerUrlInput" type="url" placeholder="https://your-worker.workers.dev/api/recipe" />
             </label>
+            <div class="provider-guide surface-inset">
+              <h3>AI 연결 방식</h3>
+              <p>Worker 환경변수에 <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>를 등록하면 추천 탭에서 ChatGPT / Claude / Gemini를 선택할 수 있습니다.</p>
+            </div>
             <div class="button-row">
               <button class="btn btn-primary" id="saveSettingsBtn" type="button">설정 저장</button>
               <button class="btn btn-secondary" id="exportBtn" type="button">데이터 내보내기</button>
@@ -208,7 +223,7 @@
         <input id="nameInput" type="text" placeholder="예: 양파" required />
       </label>
 
-      <div class="option-grid compact-grid">
+      <div class="option-grid compact-grid one-field">
         <label class="soft-field surface-inset">
           <span>분류</span>
           <select id="categoryInput">
@@ -216,23 +231,6 @@
             <option value="sub" selected>서브재료</option>
             <option value="sauce">소스류</option>
           </select>
-        </label>
-        <label class="soft-field surface-inset">
-          <span>수량</span>
-          <input id="quantityInput" type="number" min="0" step="0.5" value="1" required />
-        </label>
-        <label class="soft-field surface-inset">
-          <span>단위</span>
-          <input id="unitInput" type="text" value="개" list="unitOptions" />
-          <datalist id="unitOptions">
-            <option value="개"></option>
-            <option value="봉"></option>
-            <option value="팩"></option>
-            <option value="병"></option>
-            <option value="g"></option>
-            <option value="모"></option>
-            <option value="장"></option>
-          </datalist>
         </label>
       </div>
 
@@ -251,6 +249,6 @@
     </form>
   </dialog>
 
-  <script src="./app.js?v=7" defer></script>
+  <script src="./app.js?v=10" defer></script>
 </body>
 </html>
