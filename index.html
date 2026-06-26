@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=13" />
+  <link rel="stylesheet" href="./style.css?v=14" />
   <title>냉장고를 부탁해</title>
 </head>
 <body data-current-tab="fridge">
@@ -219,12 +219,15 @@
 
   <dialog class="modal surface-raised" id="ingredientModal">
     <form method="dialog" class="modal-form" id="ingredientForm">
-      <div class="section-title-row">
+      <div class="section-title-row modal-title-row">
         <div>
           <span class="eyebrow" id="ingredientModalEyebrow">Add</span>
           <h2 id="ingredientModalTitle">재료 추가</h2>
         </div>
-        <button class="icon-btn" value="cancel" type="button" id="closeIngredientModal">×</button>
+        <div class="modal-header-actions">
+          <button class="tiny-btn danger hidden" type="button" id="ingredientDeleteBtn">삭제</button>
+          <button class="icon-btn" value="cancel" type="button" id="closeIngredientModal">×</button>
+        </div>
       </div>
 
       <input id="editingIngredientId" type="hidden" />
@@ -260,6 +263,6 @@
     </form>
   </dialog>
 
-  <script src="./app.js?v=13" defer></script>
+  <script src="./app.js?v=14" defer></script>
 </body>
 </html>

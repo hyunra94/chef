@@ -429,8 +429,8 @@ main {
   gap: 10px;
 }
 
-/* 간단히 보기: 메인재료는 한 줄에 2개씩 표시 */
-.ingredient-groups:not(.detail-mode) .ingredient-group.category-main .ingredient-list {
+/* 간단히 보기: 모든 재료 그룹을 한 줄에 2개씩 표시 */
+.ingredient-groups:not(.detail-mode) .ingredient-list {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -533,6 +533,13 @@ main {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.icon-more {
+  min-width: 38px;
+  padding: 0 10px;
+  font-size: 1.2rem;
+  line-height: 1;
 }
 
 .qty-mini {
@@ -943,6 +950,21 @@ main {
   z-index: 9999;
 }
 
+.modal-title-row {
+  align-items: flex-start;
+}
+
+.modal-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.modal-header-actions .tiny-btn {
+  min-height: 40px;
+}
+
 @keyframes fadeUp {
   from {
     opacity: 0;
@@ -1001,7 +1023,7 @@ main {
 }
 
 @media (max-width: 380px) {
-  .ingredient-groups:not(.detail-mode) .ingredient-group.category-main .ingredient-list {
+  .ingredient-groups:not(.detail-mode) .ingredient-list {
     grid-template-columns: 1fr;
   }
 }

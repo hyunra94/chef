@@ -90,6 +90,7 @@ function collectElements() {
     headerAddBtn: $("#headerAddBtn"),
     ingredientModal: $("#ingredientModal"),
     closeIngredientModal: $("#closeIngredientModal"),
+    ingredientDeleteBtn: $("#ingredientDeleteBtn"),
     ingredientForm: $("#ingredientForm"),
     ingredientModalEyebrow: $("#ingredientModalEyebrow"),
     ingredientModalTitle: $("#ingredientModalTitle"),
@@ -127,6 +128,7 @@ function bindEvents() {
 
   on(elements.headerAddBtn, "click", () => openIngredientModal());
   on(elements.closeIngredientModal, "click", closeIngredientModal);
+  on(elements.ingredientDeleteBtn, "click", deleteEditingIngredient);
   on(elements.toggleExpireBtn, "click", toggleExpireField);
   on(elements.ingredientForm, "submit", handleIngredientSubmit);
 
@@ -231,6 +233,7 @@ function openIngredientModal(id = "") {
     elements.ingredientModalEyebrow.textContent = "Edit";
     elements.ingredientModalTitle.textContent = "재료 수정";
     elements.ingredientSubmitBtn.textContent = "수정 저장";
+    if (elements.ingredientDeleteBtn) elements.ingredientDeleteBtn.classList.remove("hidden");
     $("#nameInput").value = item.name;
     $("#categoryInput").value = item.category;
     $("#memoInput").value = item.memo || "";
@@ -262,6 +265,7 @@ function resetIngredientForm() {
   elements.ingredientModalEyebrow.textContent = "Add";
   elements.ingredientModalTitle.textContent = "재료 추가";
   elements.ingredientSubmitBtn.textContent = "저장";
+  if (elements.ingredientDeleteBtn) elements.ingredientDeleteBtn.classList.add("hidden");
   $("#categoryInput").value = settings.lastIngredientCategory || "sub";
   elements.expiresInput.value = "";
   elements.expireField.classList.add("hidden");
@@ -409,6 +413,21 @@ function toggleCategoryCollapse(scope, category) {
   renderIngredients();
 }
 
+function deleteEditingIngredient() {
+  const id = elements.editingIngredientId?.value;
+  if (!id) return;
+  const item = state.ingredients.find((ingredient) => ingredient.id === id);
+  if (!item) return;
+  const ok = confirm(`${item.name} 재료를 삭제할까요?`);
+  if (!ok) return;
+  state.ingredients = state.ingredients.filter((ingredient) => ingredient.id !== id);
+  state.recipeMustUseIds = (state.recipeMustUseIds || []).filter((itemId) => itemId !== id);
+  saveState();
+  closeIngredientModal();
+  renderAll();
+  toast(`${item.name} 재료를 삭제했어요.`);
+}
+
 function deleteIngredient(id) {
   const item = state.ingredients.find((ingredient) => ingredient.id === id);
   if (!item) return;
@@ -491,12 +510,11 @@ function renderIngredientRow(item) {
   const actions = isConsumed
     ? `
         <button class="tiny-btn success" type="button" data-action="restore-ingredient" data-id="${item.id}">복원</button>
-        <button class="tiny-btn danger" type="button" data-action="delete-ingredient" data-id="${item.id}">삭제</button>
+        <button class="tiny-btn icon-more" type="button" data-action="edit-ingredient" data-id="${item.id}" aria-label="${escapeHTML(item.name)} 수정 및 삭제">⋯</button>
       `
     : `
-        <button class="tiny-btn" type="button" data-action="edit-ingredient" data-id="${item.id}">수정</button>
         <button class="tiny-btn success" type="button" data-action="consume-ingredient" data-id="${item.id}">소진</button>
-        <button class="tiny-btn danger" type="button" data-action="delete-ingredient" data-id="${item.id}">삭제</button>
+        <button class="tiny-btn icon-more" type="button" data-action="edit-ingredient" data-id="${item.id}" aria-label="${escapeHTML(item.name)} 수정 및 삭제">⋯</button>
       `;
 
   return `
@@ -593,8 +611,12 @@ async function generateRecipes() {
     state.latestRecipes = stamped.map(cloneData);
     state.recipeHistory = [...stamped.map(cloneData), ...(state.recipeHistory || [])];
     saveState();
+    const actualProviders = [...new Set(stamped.map((recipe) => recipe.provider).filter(Boolean))];
+    const usedFallback = useWorker && requestedProvider !== "all" && actualProviders.length && !actualProviders.includes(requestedProvider);
     elements.recipeStatus.textContent = useWorker
-      ? `${providerLabels[requestedProvider] || "AI"} 추천 결과입니다. 레시피 탭에 히스토리로 저장했어요.`
+      ? usedFallback
+        ? `${providerLabels[requestedProvider] || "AI"} 호출이 제한되어 ${actualProviders.map((provider) => providerLabels[provider] || provider).join(", ")} 결과로 대신 저장했어요.`
+        : `${providerLabels[requestedProvider] || "AI"} 추천 결과입니다. 레시피 탭에 히스토리로 저장했어요.`
       : "현재는 로컬 추천 모드입니다. 레시피 탭에 히스토리로 저장했어요.";
   } catch (error) {
     console.error(error);
@@ -615,7 +637,7 @@ async function generateRecipes() {
     state.latestRecipes = fallback.map(cloneData);
     state.recipeHistory = [...fallback.map(cloneData), ...(state.recipeHistory || [])];
     saveState();
-    elements.recipeStatus.textContent = `AI 연결에 실패해 로컬 추천으로 대신 보여드려요. ${error.message || ""}`.trim();
+    elements.recipeStatus.textContent = formatAiFallbackMessage(error, requestedProvider);
   }
 
   renderLatestRecipes();
@@ -668,7 +690,12 @@ async function requestRecipesFromWorker(payload) {
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`AI Worker error: ${response.status} ${text}`.trim());
+    let message = text;
+    try {
+      const parsed = JSON.parse(text);
+      message = parsed.friendlyError || parsed.error || parsed.message || text;
+    } catch {}
+    throw new Error(`AI Worker error: ${response.status} ${message}`.trim());
   }
 
   const data = await response.json();
@@ -685,6 +712,21 @@ async function requestRecipesFromWorker(payload) {
     provider: recipe.provider || data.provider || payload.request.provider,
     model: recipe.model || data.model || ""
   }));
+}
+
+function formatAiFallbackMessage(error, provider) {
+  const raw = String(error?.message || "");
+  const label = providerLabels[provider] || "AI";
+
+  if (/User location is not supported/i.test(raw)) {
+    return `${label} 호출이 현재 Worker 실행 위치에서 제한되어 로컬 추천으로 대신 보여드려요. ChatGPT나 Claude 선택을 권장해요.`;
+  }
+
+  if (/Failed to fetch|NetworkError|CORS/i.test(raw)) {
+    return "Worker 주소 또는 CORS 연결 문제로 로컬 추천으로 대신 보여드려요. 설정 탭의 Worker 이름을 확인해주세요.";
+  }
+
+  return `AI 연결에 실패해 로컬 추천으로 대신 보여드려요. ${raw}`.trim();
 }
 
 function makeLocalRecipes(payload) {
@@ -1264,6 +1306,6 @@ function registerServiceWorker() {
   if (location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") return;
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=13", { scope: "./" }).catch((error) => console.warn("Service worker registration failed", error));
+    navigator.serviceWorker.register("./sw.js?v=14", { scope: "./" }).catch((error) => console.warn("Service worker registration failed", error));
   });
 }
