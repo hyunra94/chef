@@ -1,4 +1,5 @@
-const STORAGE_KEY = "fridge-chef-state-v1";
+const STORAGE_KEY = "fridge-chef-v6";
+const LEGACY_KEYS = ["fridge-chef-v5", "fridge-chef-v4", "fridge-chef-v3", "fridge-chef-v2", "fridge-chef-v1"];
 const SETTINGS_KEY = "fridge-chef-settings-v1";
 
 const categoryLabels = {
@@ -6,6 +7,8 @@ const categoryLabels = {
   sub: "서브재료",
   sauce: "소스류"
 };
+
+const categoryOrder = ["main", "sub", "sauce"];
 
 const defaultState = {
   ingredients: [
@@ -41,8 +44,8 @@ const defaultState = {
     }
   ],
   recipeMustUseIds: [],
-  generatedRecipes: [],
-  savedRecipes: []
+  latestRecipes: [],
+  recipeHistory: []
 };
 
 defaultState.recipeMustUseIds = [defaultState.ingredients[0].id];
@@ -51,10 +54,12 @@ let state = loadState();
 let settings = loadSettings();
 let currentFilter = "all";
 let currentSearch = "";
+let viewMode = "simple";
+let ratingFilter = "all";
+let showingTrash = false;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
-
 const elements = {};
 
 document.addEventListener("DOMContentLoaded", init);
@@ -74,28 +79,28 @@ function collectElements() {
   Object.assign(elements, {
     tabs: $$(".nav-btn"),
     panels: $$(".tab-panel"),
+    headerAddBtn: $("#headerAddBtn"),
     openIngredientBtn: $("#openIngredientBtn"),
-    openIngredientBtn2: $("#openIngredientBtn2"),
     ingredientModal: $("#ingredientModal"),
     closeIngredientModal: $("#closeIngredientModal"),
     ingredientForm: $("#ingredientForm"),
+    ingredientModalEyebrow: $("#ingredientModalEyebrow"),
+    ingredientModalTitle: $("#ingredientModalTitle"),
+    ingredientSubmitBtn: $("#ingredientSubmitBtn"),
+    editingIngredientId: $("#editingIngredientId"),
     toggleExpireBtn: $("#toggleExpireBtn"),
     expireField: $("#expireField"),
     expiresInput: $("#expiresInput"),
-    ingredientList: $("#ingredientList"),
-    urgentIngredients: $("#urgentIngredients"),
-    priorityPicker: $("#priorityPicker"),
-    totalCount: $("#totalCount"),
-    soonCount: $("#soonCount"),
-    useFirstCount: $("#useFirstCount"),
+    ingredientGroups: $("#ingredientGroups"),
+    recommendIngredientGroups: $("#recommendIngredientGroups"),
     ingredientSearch: $("#ingredientSearch"),
     recipeResults: $("#recipeResults"),
-    savedRecipes: $("#savedRecipes"),
+    recipeHistory: $("#recipeHistory"),
     recipeStatus: $("#recipeStatus"),
-    quickRecommendBtn: $("#quickRecommendBtn"),
-    homeRecommendBtn: $("#homeRecommendBtn"),
     recipeRecommendBtn: $("#recipeRecommendBtn"),
-    markAllSoonBtn: $("#markAllSoonBtn"),
+    clearSelectedBtn: $("#clearSelectedBtn"),
+    ratingFilter: $("#ratingFilter"),
+    toggleTrashBtn: $("#toggleTrashBtn"),
     workerUrlInput: $("#workerUrlInput"),
     saveSettingsBtn: $("#saveSettingsBtn"),
     exportBtn: $("#exportBtn"),
@@ -109,16 +114,24 @@ function bindEvents() {
     button.addEventListener("click", () => switchTab(button.dataset.tab));
   });
 
-  on(elements.openIngredientBtn, "click", openIngredientModal);
-  on(elements.openIngredientBtn2, "click", openIngredientModal);
+  on(elements.headerAddBtn, "click", () => openIngredientModal());
+  on(elements.openIngredientBtn, "click", () => openIngredientModal());
   on(elements.closeIngredientModal, "click", closeIngredientModal);
   on(elements.toggleExpireBtn, "click", toggleExpireField);
   on(elements.ingredientForm, "submit", handleIngredientSubmit);
 
-  $$(".segment").forEach((button) => {
+  $$("[data-filter]").forEach((button) => {
     button.addEventListener("click", () => {
       currentFilter = button.dataset.filter;
-      $$(".segment").forEach((item) => item.classList.toggle("active", item === button));
+      $$("[data-filter]").forEach((item) => item.classList.toggle("active", item === button));
+      renderIngredients();
+    });
+  });
+
+  $$("[data-view-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      viewMode = button.dataset.viewMode;
+      $$("[data-view-mode]").forEach((item) => item.classList.toggle("active", item === button));
       renderIngredients();
     });
   });
@@ -128,22 +141,23 @@ function bindEvents() {
     renderIngredients();
   });
 
-  on(elements.quickRecommendBtn, "click", generateRecipesAndOpen);
-  on(elements.homeRecommendBtn, "click", generateRecipesAndOpen);
   on(elements.recipeRecommendBtn, "click", generateRecipes);
-
-  on(elements.markAllSoonBtn, "click", () => {
-    const urgentIds = state.ingredients
-      .filter((ingredient) => {
-        const days = getDaysUntil(ingredient.expiresAt);
-        return days !== null && days <= 3;
-      })
-      .map((ingredient) => ingredient.id);
-
-    state.recipeMustUseIds = uniqueArray([...(state.recipeMustUseIds || []), ...urgentIds]);
+  on(elements.clearSelectedBtn, "click", () => {
+    state.recipeMustUseIds = [];
     saveState();
-    renderAll();
-    toast(urgentIds.length ? "임박 재료를 이번 추천에 포함했어요." : "D-3 이하 재료가 없어요.");
+    renderRecommendPicker();
+    toast("선택을 해제했어요.");
+  });
+
+  on(elements.ratingFilter, "change", (event) => {
+    ratingFilter = event.target.value;
+    renderRecipeHistory();
+  });
+
+  on(elements.toggleTrashBtn, "click", () => {
+    showingTrash = !showingTrash;
+    elements.toggleTrashBtn.textContent = showingTrash ? "히스토리 보기" : "휴지통 보기";
+    renderRecipeHistory();
   });
 
   on(elements.saveSettingsBtn, "click", () => {
@@ -154,12 +168,13 @@ function bindEvents() {
 
   on(elements.exportBtn, "click", exportData);
   on(elements.importInput, "change", importData);
-
   on(elements.resetBtn, "click", () => {
     const ok = confirm("로컬에 저장된 재료와 레시피를 모두 초기화할까요?");
     if (!ok) return;
     localStorage.removeItem(STORAGE_KEY);
-    state = { ingredients: [], recipeMustUseIds: [], generatedRecipes: [], savedRecipes: [] };
+    LEGACY_KEYS.forEach((key) => localStorage.removeItem(key));
+    state = { ingredients: [], recipeMustUseIds: [], latestRecipes: [], recipeHistory: [] };
+    saveState();
     renderAll();
     toast("초기화했어요.");
   });
@@ -182,8 +197,27 @@ function switchTab(tabName) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function openIngredientModal() {
+function openIngredientModal(id = "") {
   resetIngredientForm();
+  if (id) {
+    const item = state.ingredients.find((ingredient) => ingredient.id === id);
+    if (!item) return;
+    elements.editingIngredientId.value = item.id;
+    elements.ingredientModalEyebrow.textContent = "Edit";
+    elements.ingredientModalTitle.textContent = "재료 수정";
+    elements.ingredientSubmitBtn.textContent = "수정 저장";
+    $("#nameInput").value = item.name;
+    $("#categoryInput").value = item.category;
+    $("#quantityInput").value = item.quantity;
+    $("#unitInput").value = item.unit;
+    $("#memoInput").value = item.memo || "";
+    if (item.expiresAt) {
+      elements.expireField.classList.remove("hidden");
+      elements.expiresInput.value = item.expiresAt;
+      elements.toggleExpireBtn.textContent = "유통기한 숨기기";
+    }
+  }
+
   if (elements.ingredientModal && typeof elements.ingredientModal.showModal === "function") {
     elements.ingredientModal.showModal();
   } else if (elements.ingredientModal) {
@@ -201,6 +235,10 @@ function closeIngredientModal() {
 
 function resetIngredientForm() {
   elements.ingredientForm.reset();
+  elements.editingIngredientId.value = "";
+  elements.ingredientModalEyebrow.textContent = "Add";
+  elements.ingredientModalTitle.textContent = "재료 추가";
+  elements.ingredientSubmitBtn.textContent = "저장";
   $("#quantityInput").value = 1;
   $("#unitInput").value = "개";
   $("#categoryInput").value = "sub";
@@ -222,25 +260,32 @@ function handleIngredientSubmit(event) {
   const name = $("#nameInput").value.trim();
   if (!name) return;
 
-  const ingredient = {
-    id: makeId(),
+  const editingId = elements.editingIngredientId.value;
+  const data = {
     name,
     category: $("#categoryInput").value,
     quantity: Number($("#quantityInput").value || 0),
     unit: $("#unitInput").value.trim() || "개",
-    createdAt: todayISO(),
     expiresAt: elements.expireField.classList.contains("hidden") ? "" : elements.expiresInput.value,
     memo: $("#memoInput").value.trim()
   };
 
-  const duplicate = state.ingredients.find((item) => item.name === ingredient.name && item.category === ingredient.category && item.unit === ingredient.unit);
-
-  if (duplicate) {
-    duplicate.quantity = Number(duplicate.quantity) + Number(ingredient.quantity);
-    duplicate.expiresAt = ingredient.expiresAt || duplicate.expiresAt;
-    duplicate.memo = ingredient.memo || duplicate.memo;
+  if (editingId) {
+    const item = state.ingredients.find((ingredient) => ingredient.id === editingId);
+    if (item) Object.assign(item, data);
   } else {
-    state.ingredients.push(ingredient);
+    const duplicate = state.ingredients.find((item) => item.name === data.name && item.category === data.category && item.unit === data.unit);
+    if (duplicate) {
+      duplicate.quantity = Number(duplicate.quantity) + Number(data.quantity);
+      duplicate.expiresAt = data.expiresAt || duplicate.expiresAt;
+      duplicate.memo = data.memo || duplicate.memo;
+    } else {
+      state.ingredients.push({
+        id: makeId(),
+        ...data,
+        createdAt: todayISO()
+      });
+    }
   }
 
   cleanMustUseIds();
@@ -260,11 +305,12 @@ function handleDynamicClick(event) {
 
   if (action === "increase") adjustQuantity(id, 1);
   if (action === "decrease") adjustQuantity(id, -1);
-  if (action === "select-for-recipe") toggleRecipeMustUse(id);
+  if (action === "edit-ingredient") openIngredientModal(id);
   if (action === "delete-ingredient") deleteIngredient(id);
-  if (action === "save-recipe") saveRecipe(id);
-  if (action === "delete-saved-recipe") deleteSavedRecipe(id);
-  if (action === "rate-recipe") rateRecipe(id, Number(button.dataset.value), button.dataset.source);
+  if (action === "rate-recipe") rateRecipe(id, Number(button.dataset.value));
+  if (action === "trash-recipe") moveRecipeToTrash(id);
+  if (action === "restore-recipe") restoreRecipe(id);
+  if (action === "delete-recipe-forever") deleteRecipeForever(id);
 }
 
 function handleDynamicInput(event) {
@@ -273,9 +319,7 @@ function handleDynamicInput(event) {
   }
 
   if (event.target.matches(".review-input")) {
-    const source = event.target.dataset.source;
-    const id = event.target.dataset.id;
-    updateReview(id, event.target.value, source);
+    updateRecipeMemo(event.target.dataset.id, event.target.value);
   }
 }
 
@@ -309,7 +353,7 @@ function toggleRecipeMustUse(id, explicitValue) {
 
   state.recipeMustUseIds = Array.from(selected);
   saveState();
-  renderAll();
+  renderRecommendPicker();
 }
 
 function deleteIngredient(id) {
@@ -325,122 +369,115 @@ function deleteIngredient(id) {
 
 function renderAll() {
   cleanMustUseIds();
-  renderSummary();
-  renderUrgentIngredients();
-  renderPriorityPicker();
   renderIngredients();
-  renderRecipes();
-  renderSavedRecipes();
-}
-
-function renderSummary() {
-  const soon = state.ingredients.filter((item) => {
-    const days = getDaysUntil(item.expiresAt);
-    return days !== null && days <= 3;
-  });
-
-  elements.totalCount.textContent = state.ingredients.length;
-  elements.soonCount.textContent = soon.length;
-  elements.useFirstCount.textContent = (state.recipeMustUseIds || []).length;
-}
-
-function renderUrgentIngredients() {
-  const urgent = [...state.ingredients]
-    .filter((item) => {
-      const days = getDaysUntil(item.expiresAt);
-      return days !== null && days <= 7;
-    })
-    .sort((a, b) => (getDaysUntil(a.expiresAt) ?? 999) - (getDaysUntil(b.expiresAt) ?? 999));
-
-  if (!urgent.length) {
-    renderEmpty(elements.urgentIngredients, "유통기한이 임박한 재료가 없어요.", "유통기한을 입력하면 D-day가 표시됩니다.");
-    return;
-  }
-
-  elements.urgentIngredients.innerHTML = urgent.map((item) => {
-    const days = getDaysUntil(item.expiresAt);
-    return `
-      <span class="chip ${days <= 3 ? "danger" : ""}">
-        ${escapeHTML(item.name)}
-        <small>${formatDday(item.expiresAt)}</small>
-      </span>
-    `;
-  }).join("");
-}
-
-function renderPriorityPicker() {
-  if (!state.ingredients.length) {
-    renderEmpty(elements.priorityPicker, "이번 추천에 포함할 재료가 아직 없어요.", "재료를 추가한 뒤 원하는 재료를 직접 체크해보세요.");
-    return;
-  }
-
-  const sorted = getSortedIngredientsForRecipe();
-  const selected = new Set(state.recipeMustUseIds || []);
-  elements.priorityPicker.innerHTML = sorted.map((item) => `
-    <label class="check-chip ${selected.has(item.id) ? "active" : ""}">
-      <input type="checkbox" data-action="toggle-recipe-ingredient" data-id="${item.id}" ${selected.has(item.id) ? "checked" : ""} />
-      <span>${escapeHTML(item.name)}</span>
-      <small>${item.expiresAt ? formatDday(item.expiresAt) : categoryLabels[item.category]}</small>
-    </label>
-  `).join("");
+  renderRecommendPicker();
+  renderLatestRecipes();
+  renderRecipeHistory();
 }
 
 function renderIngredients() {
-  const filtered = state.ingredients
-    .filter((item) => currentFilter === "all" || item.category === currentFilter)
-    .filter((item) => !currentSearch || item.name.toLowerCase().includes(currentSearch) || (item.memo || "").toLowerCase().includes(currentSearch))
-    .sort((a, b) => {
-      const aDays = getDaysUntil(a.expiresAt) ?? 9999;
-      const bDays = getDaysUntil(b.expiresAt) ?? 9999;
-      if (aDays !== bDays) return aDays - bDays;
-      return a.name.localeCompare(b.name, "ko");
-    });
-
+  const filtered = getFilteredIngredients();
   if (!filtered.length) {
-    renderEmpty(elements.ingredientList, "조건에 맞는 재료가 없어요.", "상단의 + 추가 버튼으로 재료를 넣어보세요.");
+    renderEmpty(elements.ingredientGroups, "등록된 재료가 없어요.", "재료를 추가하면 분류별로 정리됩니다.");
     return;
   }
 
-  elements.ingredientList.innerHTML = filtered.map(renderIngredientCard).join("");
+  elements.ingredientGroups.classList.toggle("detail-mode", viewMode === "detail");
+  elements.ingredientGroups.innerHTML = categoryOrder
+    .map((category) => {
+      const items = filtered.filter((item) => item.category === category);
+      if (!items.length) return "";
+      return renderIngredientGroup(category, items);
+    })
+    .join("");
 }
 
-function renderIngredientCard(item) {
-  const days = getDaysUntil(item.expiresAt);
-  const ddayClass = days !== null && days <= 3 ? "danger" : "safe";
-  const selected = (state.recipeMustUseIds || []).includes(item.id);
+function getFilteredIngredients() {
+  return [...state.ingredients]
+    .filter((item) => currentFilter === "all" || item.category === currentFilter)
+    .filter((item) => {
+      if (!currentSearch) return true;
+      return [item.name, item.memo, categoryLabels[item.category]].some((value) => String(value || "").toLowerCase().includes(currentSearch));
+    })
+    .sort(sortIngredients);
+}
+
+function renderIngredientGroup(category, items) {
   return `
-    <article class="ingredient-card">
-      <div class="ingredient-head">
-        <div>
-          <div class="ingredient-name">${escapeHTML(item.name)}</div>
-          <div class="ingredient-meta">
-            <span class="category-badge">${categoryLabels[item.category]}</span>
-            <span class="d-day-badge ${item.expiresAt ? ddayClass : ""}">${item.expiresAt ? formatDday(item.expiresAt) : "기한 없음"}</span>
-          </div>
+    <section class="ingredient-group surface-inset">
+      <div class="group-title-row">
+        <h3>${escapeHTML(categoryLabels[category])}</h3>
+        <span class="group-count">${items.length}개</span>
+      </div>
+      <div class="ingredient-list">
+        ${items.map(renderIngredientRow).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderIngredientRow(item) {
+  const dday = formatDday(item.expiresAt);
+  const days = getDaysUntil(item.expiresAt);
+  const ddayClass = days !== null && days <= 3 ? "danger" : days !== null ? "safe" : "";
+  const detailParts = [
+    `입력일 ${formatDate(item.createdAt)}`,
+    item.expiresAt ? `유통기한 ${formatDate(item.expiresAt)}` : "유통기한 없음",
+    item.memo ? `메모 ${item.memo}` : ""
+  ].filter(Boolean);
+
+  return `
+    <article class="ingredient-row surface-raised-small">
+      <div class="ingredient-main">
+        <div class="ingredient-name-row">
+          <strong class="ingredient-name">${escapeHTML(item.name)}</strong>
+          <span class="qty-text">${escapeHTML(item.quantity)}${escapeHTML(item.unit)}</span>
+          ${item.expiresAt ? `<span class="d-day-badge ${ddayClass}">${escapeHTML(dday)}</span>` : ""}
         </div>
+        <div class="row-detail">${escapeHTML(detailParts.join(" · "))}</div>
       </div>
-
-      ${item.memo ? `<p class="recipe-summary">${escapeHTML(item.memo)}</p>` : ""}
-
-      <div class="quantity-row">
-        <button class="qty-btn" type="button" data-action="decrease" data-id="${item.id}">−</button>
-        <div class="qty-value">${item.quantity}${escapeHTML(item.unit)}</div>
-        <button class="qty-btn" type="button" data-action="increase" data-id="${item.id}">+</button>
-      </div>
-
-      <div class="card-actions">
-        <button class="tiny-btn ${selected ? "active" : ""}" type="button" data-action="select-for-recipe" data-id="${item.id}">
-          ${selected ? "추천에 포함됨" : "이번 추천에 포함"}
-        </button>
+      <div class="row-actions">
+        <div class="qty-mini surface-inset-small" aria-label="수량 조절">
+          <button class="qty-btn" type="button" data-action="decrease" data-id="${item.id}">−</button>
+          <button class="qty-btn" type="button" data-action="increase" data-id="${item.id}">+</button>
+        </div>
+        <button class="tiny-btn" type="button" data-action="edit-ingredient" data-id="${item.id}">수정</button>
         <button class="tiny-btn danger" type="button" data-action="delete-ingredient" data-id="${item.id}">삭제</button>
       </div>
     </article>
   `;
 }
 
-async function generateRecipesAndOpen() {
-  await generateRecipes();
-  if (state.ingredients.length) switchTab("recipes");
+function renderRecommendPicker() {
+  if (!state.ingredients.length) {
+    renderEmpty(elements.recommendIngredientGroups, "선택할 재료가 없어요.", "냉장고 탭에서 재료를 먼저 추가해주세요.");
+    return;
+  }
+
+  const selected = new Set(state.recipeMustUseIds || []);
+  elements.recommendIngredientGroups.innerHTML = categoryOrder
+    .map((category) => {
+      const items = state.ingredients.filter((item) => item.category === category).sort(sortIngredients);
+      if (!items.length) return "";
+      return `
+        <div class="recommend-group">
+          <h4>${escapeHTML(categoryLabels[category])}</h4>
+          ${items.map((item) => renderRecommendChip(item, selected)).join("")}
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderRecommendChip(item, selected) {
+  const checked = selected.has(item.id);
+  const dday = item.expiresAt ? formatDday(item.expiresAt) : "";
+  return `
+    <label class="check-chip ${checked ? "active" : ""}">
+      <span>${escapeHTML(item.name)} <small>${escapeHTML(item.quantity)}${escapeHTML(item.unit)} ${escapeHTML(dday)}</small></span>
+      <input type="checkbox" data-action="toggle-recipe-ingredient" data-id="${item.id}" ${checked ? "checked" : ""} />
+    </label>
+  `;
 }
 
 async function generateRecipes() {
@@ -457,23 +494,38 @@ async function generateRecipes() {
 
   try {
     const recipes = settings.workerUrl ? await requestRecipesFromWorker(payload) : makeLocalRecipes(payload);
-    state.generatedRecipes = recipes.map((recipe) => ({
+    const stamped = recipes.slice(0, 3).map((recipe) => normalizeRecipe({
       ...recipe,
       id: recipe.id || makeId(),
       rating: recipe.rating || 0,
-      review: recipe.review || "",
-      createdAt: new Date().toISOString()
+      memo: recipe.memo || recipe.review || "",
+      createdAt: new Date().toISOString(),
+      deletedAt: "",
+      batchId: makeId()
     }));
+    state.latestRecipes = stamped.map(cloneData);
+    state.recipeHistory = [...stamped.map(cloneData), ...(state.recipeHistory || [])];
     saveState();
-    elements.recipeStatus.textContent = settings.workerUrl ? "AI 추천 결과입니다." : "현재는 로컬 추천 모드입니다. Worker URL을 넣으면 AI 추천으로 전환됩니다.";
+    elements.recipeStatus.textContent = settings.workerUrl ? "AI 추천 결과입니다. 레시피 탭에 히스토리로 저장했어요." : "현재는 로컬 추천 모드입니다. 레시피 탭에 히스토리로 저장했어요.";
   } catch (error) {
     console.error(error);
-    state.generatedRecipes = makeLocalRecipes(payload).map((recipe) => ({ ...recipe, id: makeId(), rating: 0, review: "", createdAt: new Date().toISOString() }));
+    const fallback = makeLocalRecipes(payload).map((recipe) => normalizeRecipe({
+      ...recipe,
+      id: makeId(),
+      rating: 0,
+      memo: "",
+      createdAt: new Date().toISOString(),
+      deletedAt: "",
+      batchId: makeId()
+    }));
+    state.latestRecipes = fallback.map(cloneData);
+    state.recipeHistory = [...fallback.map(cloneData), ...(state.recipeHistory || [])];
     saveState();
-    elements.recipeStatus.textContent = "AI 연결에 실패해 로컬 추천으로 대신 보여드려요.";
+    elements.recipeStatus.textContent = "AI 연결에 실패해 로컬 추천으로 대신 보여드려요. 레시피 탭에 히스토리로 저장했어요.";
   }
 
-  renderRecipes();
+  renderLatestRecipes();
+  renderRecipeHistory();
 }
 
 function buildRecipePayload() {
@@ -537,9 +589,9 @@ function makeLocalRecipes(payload) {
 
   const mustUseText = mustUse.length
     ? `선택한 재료 ${mustUse.map((item) => item.name).join(", ")}를 꼭 포함하도록 구성했어요.`
-    : "선택 재료가 없어서 유통기한과 재료 분류를 기준으로 구성했어요.";
+    : "선택 재료가 없어서 냉장고에 있는 재료를 기준으로 구성했어요.";
 
-  const candidates = [
+  return [
     {
       title: `${main.name} ${sub1.name} 간단 볶음`,
       summary: `${main.name}와 ${sub1.name}를 ${sauce.name}로 가볍게 볶는 ${payload.request.style} 메뉴입니다. ${mustUseText}`,
@@ -578,55 +630,70 @@ function makeLocalRecipes(payload) {
       steps: [
         `재료를 잘게 썰어 반죽에 섞습니다.`,
         `${sauce.name}를 약간 넣어 밑간합니다.`,
-        `팬에 기름을 두르고 얇게 펼쳐 굽습니다.`,
+        `팬에 기름을 두르고 얇게 펼쳐 굽니다.`,
         `앞뒤가 노릇해지면 꺼내 먹기 좋게 자릅니다.`
       ]
     }
   ];
-
-  return candidates.slice(0, 3).map((recipe) => ({
-    id: makeId(),
-    ...recipe,
-    rating: 0,
-    review: ""
-  }));
 }
 
-function renderRecipes() {
-  if (!state.generatedRecipes.length) {
-    renderEmpty(elements.recipeResults, "아직 추천받은 레시피가 없어요.", "원하는 재료를 체크한 뒤 추천 받기 버튼을 눌러보세요.");
+function renderLatestRecipes() {
+  if (!state.latestRecipes.length) {
+    renderEmpty(elements.recipeResults, "아직 추천받은 레시피가 없어요.", "재료를 선택한 뒤 AI 추천 받기 버튼을 눌러보세요.");
+    return;
+  }
+  elements.recipeResults.innerHTML = state.latestRecipes.map((recipe) => renderRecipeCard(recipe, "latest")).join("");
+}
+
+function renderRecipeHistory() {
+  const recipes = getVisibleRecipes();
+  if (!recipes.length) {
+    const title = showingTrash ? "휴지통이 비어 있어요." : "레시피 히스토리가 없어요.";
+    const subtitle = showingTrash ? "삭제한 레시피가 이곳에 표시됩니다." : "추천을 받으면 이곳에 자동으로 쌓입니다.";
+    renderEmpty(elements.recipeHistory, title, subtitle);
     return;
   }
 
-  elements.recipeResults.innerHTML = state.generatedRecipes.map((recipe) => renderRecipeCard(recipe, "generated")).join("");
+  elements.recipeHistory.innerHTML = recipes.map((recipe) => renderRecipeCard(recipe, "history")).join("");
 }
 
-function renderSavedRecipes() {
-  if (!state.savedRecipes.length) {
-    renderEmpty(elements.savedRecipes, "저장한 레시피가 없어요.", "마음에 드는 추천 레시피를 저장해보세요.");
-    return;
-  }
+function getVisibleRecipes() {
+  const deleted = showingTrash;
+  return [...(state.recipeHistory || [])]
+    .filter((recipe) => Boolean(recipe.deletedAt) === deleted)
+    .filter((recipe) => matchRatingFilter(recipe))
+    .sort((a, b) => new Date(b.createdAt || b.savedAt || 0) - new Date(a.createdAt || a.savedAt || 0));
+}
 
-  elements.savedRecipes.innerHTML = [...state.savedRecipes]
-    .sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt))
-    .map((recipe) => renderRecipeCard(recipe, "saved"))
-    .join("");
+function matchRatingFilter(recipe) {
+  const rating = Number(recipe.rating || 0);
+  if (ratingFilter === "all") return true;
+  if (ratingFilter === "5") return rating === 5;
+  if (ratingFilter === "4plus") return rating >= 4;
+  if (ratingFilter === "3plus") return rating >= 3;
+  if (ratingFilter === "unrated") return rating === 0;
+  return true;
 }
 
 function renderRecipeCard(recipe, source) {
-  const isSavedSource = source === "saved";
-  const actionButton = isSavedSource
-    ? `<button class="tiny-btn danger" type="button" data-action="delete-saved-recipe" data-id="${recipe.id}">저장 삭제</button>`
-    : `<button class="tiny-btn" type="button" data-action="save-recipe" data-id="${recipe.id}">저장하기</button>`;
+  const isTrash = Boolean(recipe.deletedAt);
+  const canEdit = source !== "latest";
+  const historyActions = isTrash
+    ? `
+      <button class="tiny-btn success" type="button" data-action="restore-recipe" data-id="${recipe.id}">복원</button>
+      <button class="tiny-btn danger" type="button" data-action="delete-recipe-forever" data-id="${recipe.id}">완전 삭제</button>
+    `
+    : `<button class="tiny-btn danger" type="button" data-action="trash-recipe" data-id="${recipe.id}">휴지통</button>`;
 
   return `
-    <article class="recipe-card">
+    <article class="recipe-card ${isTrash ? "deleted" : ""}">
       <div class="recipe-head">
         <div>
           <div class="recipe-title">${escapeHTML(recipe.title)}</div>
           <div class="recipe-meta">
             <span class="category-badge">${escapeHTML(recipe.cookingTime || "30분")}</span>
             <span class="category-badge">${escapeHTML(recipe.difficulty || "쉬움")}</span>
+            ${recipe.createdAt ? `<span class="category-badge">${escapeHTML(formatDate(recipe.createdAt))}</span>` : ""}
           </div>
         </div>
       </div>
@@ -652,77 +719,87 @@ function renderRecipeCard(recipe, source) {
       <div class="rating-box">
         <div class="star-row" aria-label="별점">
           ${[1, 2, 3, 4, 5].map((value) => `
-            <button class="star-btn ${Number(recipe.rating) >= value ? "active" : ""}" type="button" data-action="rate-recipe" data-id="${recipe.id}" data-source="${source}" data-value="${value}">★</button>
+            <button class="star-btn ${Number(recipe.rating) >= value ? "active" : ""}" type="button" data-action="rate-recipe" data-id="${recipe.id}" data-value="${value}">★</button>
           `).join("")}
         </div>
-        <textarea class="review-input" data-id="${recipe.id}" data-source="${source}" placeholder="먹어본 후기나 다음에 바꿀 점을 적어보세요.">${escapeHTML(recipe.review || "")}</textarea>
+        ${canEdit ? `<textarea class="review-input" data-id="${recipe.id}" placeholder="메모를 남겨보세요. 예: 다음엔 고춧가루 추가">${escapeHTML(recipe.memo || recipe.review || "")}</textarea>` : ""}
       </div>
 
-      <div class="card-actions">
-        ${actionButton}
-      </div>
+      ${canEdit ? `<div class="card-actions">${historyActions}</div>` : ""}
     </article>
   `;
 }
 
-function saveRecipe(id) {
-  const recipe = state.generatedRecipes.find((item) => item.id === id);
-  if (!recipe) return;
-
-  const alreadySaved = state.savedRecipes.some((item) => item.sourceId === id || item.title === recipe.title);
-  if (alreadySaved) {
-    toast("이미 저장된 레시피예요.");
-    return;
+function rateRecipe(id, rating) {
+  const recipe = findRecipeInHistory(id);
+  if (recipe) {
+    recipe.rating = rating;
   }
 
-  state.savedRecipes.push({
-    ...cloneData(recipe),
-    id: makeId(),
-    sourceId: id,
-    savedAt: new Date().toISOString()
-  });
+  const latest = state.latestRecipes.find((item) => item.id === id);
+  if (latest) latest.rating = rating;
+
   saveState();
-  renderSavedRecipes();
-  toast("레시피를 저장했어요.");
+  renderLatestRecipes();
+  renderRecipeHistory();
 }
 
-function deleteSavedRecipe(id) {
-  const ok = confirm("저장한 레시피를 삭제할까요?");
+function updateRecipeMemo(id, memo) {
+  const recipe = findRecipeInHistory(id);
+  if (!recipe) return;
+  recipe.memo = memo;
+  const latest = state.latestRecipes.find((item) => item.id === id);
+  if (latest) latest.memo = memo;
+  saveState();
+}
+
+function moveRecipeToTrash(id) {
+  const recipe = findRecipeInHistory(id);
+  if (!recipe) return;
+  recipe.deletedAt = new Date().toISOString();
+  saveState();
+  renderRecipeHistory();
+  toast("휴지통으로 이동했어요.");
+}
+
+function restoreRecipe(id) {
+  const recipe = findRecipeInHistory(id);
+  if (!recipe) return;
+  recipe.deletedAt = "";
+  saveState();
+  renderRecipeHistory();
+  toast("복원했어요.");
+}
+
+function deleteRecipeForever(id) {
+  const ok = confirm("이 레시피를 완전히 삭제할까요?");
   if (!ok) return;
-  state.savedRecipes = state.savedRecipes.filter((recipe) => recipe.id !== id);
+  state.recipeHistory = state.recipeHistory.filter((recipe) => recipe.id !== id);
+  state.latestRecipes = state.latestRecipes.filter((recipe) => recipe.id !== id);
   saveState();
-  renderSavedRecipes();
+  renderLatestRecipes();
+  renderRecipeHistory();
 }
 
-function rateRecipe(id, rating, source) {
-  const collection = source === "saved" ? state.savedRecipes : state.generatedRecipes;
-  const recipe = collection.find((item) => item.id === id);
-  if (!recipe) return;
-  recipe.rating = rating;
-  saveState();
-  if (source === "saved") renderSavedRecipes();
-  else renderRecipes();
-}
-
-function updateReview(id, review, source) {
-  const collection = source === "saved" ? state.savedRecipes : state.generatedRecipes;
-  const recipe = collection.find((item) => item.id === id);
-  if (!recipe) return;
-  recipe.review = review;
-  saveState();
+function findRecipeInHistory(id) {
+  return (state.recipeHistory || []).find((recipe) => recipe.id === id);
 }
 
 function getSortedIngredientsForRecipe() {
   const selected = new Set(state.recipeMustUseIds || []);
   return [...state.ingredients].sort((a, b) => {
     if (selected.has(a.id) !== selected.has(b.id)) return selected.has(a.id) ? -1 : 1;
-    const aDays = getDaysUntil(a.expiresAt) ?? 9999;
-    const bDays = getDaysUntil(b.expiresAt) ?? 9999;
-    if (aDays !== bDays) return aDays - bDays;
-    const categoryWeight = { main: 0, sub: 1, sauce: 2 };
-    if (categoryWeight[a.category] !== categoryWeight[b.category]) return categoryWeight[a.category] - categoryWeight[b.category];
-    return a.name.localeCompare(b.name, "ko");
+    return sortIngredients(a, b);
   });
+}
+
+function sortIngredients(a, b) {
+  const categoryWeight = { main: 0, sub: 1, sauce: 2 };
+  if (categoryWeight[a.category] !== categoryWeight[b.category]) return categoryWeight[a.category] - categoryWeight[b.category];
+  const aDays = getDaysUntil(a.expiresAt) ?? 9999;
+  const bDays = getDaysUntil(b.expiresAt) ?? 9999;
+  if (aDays !== bDays) return aDays - bDays;
+  return a.name.localeCompare(b.name, "ko");
 }
 
 function renderEmpty(target, title, subtitle) {
@@ -753,7 +830,7 @@ function uniqueArray(items) {
 function getDaysUntil(dateString) {
   if (!dateString) return null;
   const today = new Date(todayISO());
-  const target = new Date(dateString);
+  const target = new Date(String(dateString).slice(0, 10));
   if (Number.isNaN(target.getTime())) return null;
   return Math.ceil((target - today) / 86400000);
 }
@@ -764,6 +841,11 @@ function formatDday(dateString) {
   if (days < 0) return `D+${Math.abs(days)}`;
   if (days === 0) return "D-Day";
   return `D-${days}`;
+}
+
+function formatDate(value) {
+  if (!value) return "";
+  return String(value).slice(0, 10);
 }
 
 function todayISO() {
@@ -794,24 +876,42 @@ function cloneData(data) {
 
 function loadState() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || LEGACY_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
     const parsed = raw ? JSON.parse(raw) : cloneData(defaultState);
-    const ingredients = Array.isArray(parsed.ingredients) ? parsed.ingredients.map(normalizeIngredient) : [];
-    const migratedMustUseIds = ingredients.filter((item) => item.useFirst).map((item) => item.id);
-    const recipeMustUseIds = Array.isArray(parsed.recipeMustUseIds)
-      ? parsed.recipeMustUseIds
-      : migratedMustUseIds;
-
-    return {
-      ingredients,
-      recipeMustUseIds: uniqueArray(recipeMustUseIds),
-      generatedRecipes: Array.isArray(parsed.generatedRecipes) ? parsed.generatedRecipes : [],
-      savedRecipes: Array.isArray(parsed.savedRecipes) ? parsed.savedRecipes : []
-    };
+    return migrateState(parsed);
   } catch (error) {
     console.error(error);
     return cloneData(defaultState);
   }
+}
+
+function migrateState(parsed) {
+  const ingredients = Array.isArray(parsed.ingredients) ? parsed.ingredients.map(normalizeIngredient) : [];
+  const migratedMustUseIds = ingredients.filter((item) => item.useFirst).map((item) => item.id);
+  const recipeMustUseIds = Array.isArray(parsed.recipeMustUseIds) ? parsed.recipeMustUseIds : migratedMustUseIds;
+
+  const legacyGenerated = Array.isArray(parsed.generatedRecipes) ? parsed.generatedRecipes : [];
+  const legacySaved = Array.isArray(parsed.savedRecipes) ? parsed.savedRecipes : [];
+  const recipeHistory = Array.isArray(parsed.recipeHistory)
+    ? parsed.recipeHistory.map(normalizeRecipe)
+    : [...legacySaved, ...legacyGenerated].map((recipe) => normalizeRecipe({
+      ...recipe,
+      id: recipe.id || makeId(),
+      memo: recipe.memo || recipe.review || "",
+      createdAt: recipe.createdAt || recipe.savedAt || new Date().toISOString(),
+      deletedAt: ""
+    }));
+
+  const latestRecipes = Array.isArray(parsed.latestRecipes)
+    ? parsed.latestRecipes.map(normalizeRecipe)
+    : legacyGenerated.map(normalizeRecipe);
+
+  return {
+    ingredients,
+    recipeMustUseIds: uniqueArray(recipeMustUseIds),
+    latestRecipes,
+    recipeHistory
+  };
 }
 
 function normalizeIngredient(item) {
@@ -825,6 +925,23 @@ function normalizeIngredient(item) {
     expiresAt: item.expiresAt || "",
     memo: item.memo || "",
     useFirst: Boolean(item.useFirst)
+  };
+}
+
+function normalizeRecipe(recipe) {
+  return {
+    id: recipe.id || makeId(),
+    title: recipe.title || "이름 없는 레시피",
+    summary: recipe.summary || "",
+    usedIngredients: Array.isArray(recipe.usedIngredients) ? recipe.usedIngredients : [],
+    missingOptionalIngredients: Array.isArray(recipe.missingOptionalIngredients) ? recipe.missingOptionalIngredients : [],
+    cookingTime: recipe.cookingTime || "30분",
+    difficulty: recipe.difficulty || "쉬움",
+    steps: Array.isArray(recipe.steps) ? recipe.steps : [],
+    rating: Number(recipe.rating || 0),
+    memo: recipe.memo || recipe.review || "",
+    createdAt: recipe.createdAt || recipe.savedAt || new Date().toISOString(),
+    deletedAt: recipe.deletedAt || ""
   };
 }
 
@@ -884,12 +1001,7 @@ async function importData(event) {
     if (!data.state || !Array.isArray(data.state.ingredients)) {
       throw new Error("지원하지 않는 백업 파일입니다.");
     }
-    state = {
-      ingredients: data.state.ingredients.map(normalizeIngredient),
-      recipeMustUseIds: uniqueArray(data.state.recipeMustUseIds || data.state.ingredients.filter((item) => item.useFirst).map((item) => item.id)),
-      generatedRecipes: Array.isArray(data.state.generatedRecipes) ? data.state.generatedRecipes : [],
-      savedRecipes: Array.isArray(data.state.savedRecipes) ? data.state.savedRecipes : []
-    };
+    state = migrateState(data.state);
     settings = data.settings || settings;
     saveState();
     saveSettings();
@@ -915,22 +1027,9 @@ function escapeHTML(value) {
 function toast(message) {
   const existing = document.querySelector(".toast");
   if (existing) existing.remove();
-
   const node = document.createElement("div");
   node.className = "toast surface-raised-small";
   node.textContent = message;
-  Object.assign(node.style, {
-    position: "fixed",
-    left: "50%",
-    bottom: "96px",
-    transform: "translateX(-50%)",
-    padding: "14px 18px",
-    borderRadius: "16px",
-    background: "#E0E5EC",
-    color: "#3D4852",
-    fontWeight: "900",
-    zIndex: "9999"
-  });
   document.body.appendChild(node);
   setTimeout(() => node.remove(), 1800);
 }
@@ -940,6 +1039,6 @@ function registerServiceWorker() {
   if (location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") return;
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=5", { scope: "./" }).catch((error) => console.warn("Service worker registration failed", error));
+    navigator.serviceWorker.register("./sw.js?v=6", { scope: "./" }).catch((error) => console.warn("Service worker registration failed", error));
   });
 }

@@ -10,111 +10,70 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=5" />
+  <link rel="stylesheet" href="./style.css?v=6" />
   <title>냉장고를 부탁해</title>
 </head>
 <body>
   <div class="app-shell">
-    <header class="hero-card surface-raised">
-      <div class="hero-copy">
+    <header class="app-header surface-raised">
+      <div>
         <span class="eyebrow">Fridge Chef</span>
         <h1>냉장고를 부탁해</h1>
-        <p>지금 있는 재료와 유통기한을 기준으로 오늘 해먹을 수 있는 레시피를 추천해드릴게요.</p>
+        <p>재료는 냉장고 DB에 등록하고, 추천 탭에서 원하는 재료를 골라 레시피를 받아보세요.</p>
       </div>
-      <div class="hero-actions">
-        <button class="btn btn-primary" id="openIngredientBtn" type="button">+ 재료 추가</button>
-        <button class="btn btn-secondary" id="quickRecommendBtn" type="button">AI 레시피 추천</button>
-      </div>
+      <button class="btn btn-primary" id="headerAddBtn" type="button">+ 재료 추가</button>
     </header>
 
     <nav class="bottom-nav surface-raised-small" aria-label="주요 메뉴">
-      <button class="nav-btn active" type="button" data-tab="home">홈</button>
-      <button class="nav-btn" type="button" data-tab="fridge">냉장고</button>
-      <button class="nav-btn" type="button" data-tab="recipes">추천</button>
-      <button class="nav-btn" type="button" data-tab="saved">저장</button>
+      <button class="nav-btn active" type="button" data-tab="fridge">냉장고</button>
+      <button class="nav-btn" type="button" data-tab="recommend">추천</button>
+      <button class="nav-btn" type="button" data-tab="recipes">레시피</button>
       <button class="nav-btn" type="button" data-tab="settings">설정</button>
     </nav>
 
     <main>
-      <section class="tab-panel active" id="tab-home" aria-labelledby="home">
-        <div class="grid two-col">
-          <article class="card surface-raised">
-            <div class="section-title-row">
-              <div>
-                <span class="eyebrow">Today</span>
-                <h2>먼저 써야 할 재료</h2>
-              </div>
-              <button class="icon-btn" id="markAllSoonBtn" type="button" title="임박 재료 우선소모 체크">✓</button>
-            </div>
-            <div id="urgentIngredients" class="chip-list empty-area"></div>
-          </article>
-
-          <article class="card surface-raised">
-            <span class="eyebrow">Summary</span>
-            <h2>내 냉장고 현황</h2>
-            <div class="stats-grid">
-              <div class="stat-well surface-inset">
-                <strong id="totalCount">0</strong>
-                <span>전체 재료</span>
-              </div>
-              <div class="stat-well surface-inset">
-                <strong id="soonCount">0</strong>
-                <span>D-3 이하</span>
-              </div>
-              <div class="stat-well surface-inset">
-                <strong id="useFirstCount">0</strong>
-                <span>추천 선택</span>
-              </div>
-            </div>
-          </article>
-        </div>
-
-        <article class="card surface-raised recommendation-box">
-          <div class="section-title-row">
-            <div>
-              <span class="eyebrow">Cook Now</span>
-              <h2>오늘의 추천 준비</h2>
-              <p class="muted">이번 추천에 꼭 포함할 재료를 직접 체크한 뒤 추천을 받아보세요.</p>
-            </div>
-            <button class="btn btn-primary" id="homeRecommendBtn" type="button">추천 받기</button>
-          </div>
-          <div id="priorityPicker" class="ingredient-priority-list empty-area"></div>
-        </article>
-      </section>
-
-      <section class="tab-panel" id="tab-fridge" aria-labelledby="fridge">
+      <section class="tab-panel active" id="tab-fridge">
         <article class="card surface-raised">
           <div class="section-title-row wrap">
             <div>
-              <span class="eyebrow">Ingredients</span>
-              <h2>내 냉장고</h2>
+              <span class="eyebrow">Ingredients DB</span>
+              <h2>냉장고</h2>
+              <p class="muted">재료를 분류별로 모아보고, 수량·유통기한·메모를 관리합니다.</p>
             </div>
             <div class="toolbar">
-              <div class="segmented surface-inset-small" role="tablist" aria-label="재료 분류">
-                <button class="segment active" type="button" data-filter="all">전체</button>
-                <button class="segment" type="button" data-filter="main">메인</button>
-                <button class="segment" type="button" data-filter="sub">서브</button>
-                <button class="segment" type="button" data-filter="sauce">소스</button>
+              <div class="segmented surface-inset-small" aria-label="보기 방식">
+                <button class="segment active" type="button" data-view-mode="simple">간단히</button>
+                <button class="segment" type="button" data-view-mode="detail">상세히</button>
               </div>
-              <button class="btn btn-secondary compact" id="openIngredientBtn2" type="button">+ 추가</button>
+              <button class="btn btn-secondary compact" id="openIngredientBtn" type="button">+ 추가</button>
             </div>
           </div>
-          <div class="search-well surface-inset-deep">
-            <input id="ingredientSearch" type="search" placeholder="재료 검색" autocomplete="off" />
+
+          <div class="fridge-controls">
+            <div class="search-well surface-inset-deep">
+              <input id="ingredientSearch" type="search" placeholder="재료 검색" autocomplete="off" />
+            </div>
+            <div class="segmented surface-inset-small" aria-label="재료 분류 필터">
+              <button class="segment active" type="button" data-filter="all">전체</button>
+              <button class="segment" type="button" data-filter="main">메인</button>
+              <button class="segment" type="button" data-filter="sub">서브</button>
+              <button class="segment" type="button" data-filter="sauce">소스</button>
+            </div>
           </div>
-          <div id="ingredientList" class="ingredient-grid empty-area"></div>
+
+          <div id="ingredientGroups" class="ingredient-groups empty-area"></div>
         </article>
       </section>
 
-      <section class="tab-panel" id="tab-recipes" aria-labelledby="recipes">
+      <section class="tab-panel" id="tab-recommend">
         <article class="card surface-raised">
           <div class="section-title-row wrap">
             <div>
               <span class="eyebrow">AI Recipe</span>
               <h2>레시피 추천</h2>
-              <p class="muted">체크한 재료는 유통기한과 관계없이 꼭 포함해서 2~3개의 레시피를 보여줍니다.</p>
+              <p class="muted">냉장고에 등록된 재료 중 이번 레시피에 꼭 넣을 재료를 선택하세요.</p>
             </div>
-            <button class="btn btn-primary" id="recipeRecommendBtn" type="button">다시 추천</button>
+            <button class="btn btn-primary" id="recipeRecommendBtn" type="button">AI 추천 받기</button>
           </div>
 
           <div class="option-grid">
@@ -147,24 +106,59 @@
             </label>
           </div>
 
-          <div id="recipeStatus" class="status-line"></div>
-          <div id="recipeResults" class="recipe-grid empty-area"></div>
+          <div class="recommend-layout">
+            <section class="recommend-picker surface-inset">
+              <div class="mini-title-row">
+                <div>
+                  <h3>이번 추천에 포함할 재료</h3>
+                  <p class="muted">유통기한과 상관없이 직접 고른 재료가 우선 반영됩니다.</p>
+                </div>
+                <button class="tiny-btn" type="button" id="clearSelectedBtn">선택 해제</button>
+              </div>
+              <div id="recommendIngredientGroups" class="recommend-groups empty-area"></div>
+            </section>
+
+            <section class="latest-results">
+              <div class="mini-title-row">
+                <div>
+                  <h3>추천 결과</h3>
+                  <p class="muted">추천 결과는 레시피 탭 히스토리에 자동으로 남습니다.</p>
+                </div>
+              </div>
+              <div id="recipeStatus" class="status-line"></div>
+              <div id="recipeResults" class="recipe-grid empty-area"></div>
+            </section>
+          </div>
         </article>
       </section>
 
-      <section class="tab-panel" id="tab-saved" aria-labelledby="saved">
+      <section class="tab-panel" id="tab-recipes">
         <article class="card surface-raised">
-          <div class="section-title-row">
+          <div class="section-title-row wrap">
             <div>
-              <span class="eyebrow">Saved</span>
-              <h2>저장한 레시피</h2>
+              <span class="eyebrow">Recipe History</span>
+              <h2>레시피</h2>
+              <p class="muted">추천받은 레시피 히스토리를 별점·메모와 함께 관리합니다.</p>
+            </div>
+            <div class="toolbar">
+              <label class="soft-field small-select surface-inset">
+                <span>별점 필터</span>
+                <select id="ratingFilter">
+                  <option value="all">전체</option>
+                  <option value="5">5점</option>
+                  <option value="4plus">4점 이상</option>
+                  <option value="3plus">3점 이상</option>
+                  <option value="unrated">미평가</option>
+                </select>
+              </label>
+              <button class="btn btn-secondary compact" type="button" id="toggleTrashBtn">휴지통 보기</button>
             </div>
           </div>
-          <div id="savedRecipes" class="recipe-grid empty-area"></div>
+          <div id="recipeHistory" class="recipe-grid empty-area"></div>
         </article>
       </section>
 
-      <section class="tab-panel" id="tab-settings" aria-labelledby="settings">
+      <section class="tab-panel" id="tab-settings">
         <article class="card surface-raised settings-card">
           <span class="eyebrow">Settings</span>
           <h2>설정</h2>
@@ -185,7 +179,7 @@
 
           <div class="notion-roadmap surface-inset">
             <h3>Notion DB 확장 예정</h3>
-            <p>재료 DB, 레시피 DB, 평가 DB로 분리하면 로컬 데이터 구조를 거의 그대로 옮길 수 있습니다.</p>
+            <p>재료 DB와 레시피 히스토리 DB를 분리하면 지금 로컬 데이터 구조를 그대로 옮기기 쉽습니다.</p>
           </div>
 
           <button class="danger-link" id="resetBtn" type="button">로컬 데이터 초기화</button>
@@ -198,11 +192,13 @@
     <form method="dialog" class="modal-form" id="ingredientForm">
       <div class="section-title-row">
         <div>
-          <span class="eyebrow">Add</span>
-          <h2>재료 추가</h2>
+          <span class="eyebrow" id="ingredientModalEyebrow">Add</span>
+          <h2 id="ingredientModalTitle">재료 추가</h2>
         </div>
         <button class="icon-btn" value="cancel" type="button" id="closeIngredientModal">×</button>
       </div>
+
+      <input id="editingIngredientId" type="hidden" />
 
       <label class="soft-field surface-inset">
         <span>재료명</span>
@@ -243,24 +239,15 @@
         <input id="expiresInput" type="date" />
       </label>
 
-      <p class="muted mini-note">재료 저장 후 홈 또는 냉장고 화면에서 이번 추천에 포함할 재료를 따로 선택할 수 있어요.</p>
-
       <label class="soft-field surface-inset">
         <span>메모</span>
         <textarea id="memoInput" rows="3" placeholder="예: 반만 남음, 냉동실 보관"></textarea>
       </label>
 
-      <button class="btn btn-primary full" type="submit">저장</button>
+      <button class="btn btn-primary full" type="submit" id="ingredientSubmitBtn">저장</button>
     </form>
   </dialog>
 
-  <template id="emptyTemplate">
-    <div class="empty-card surface-inset">
-      <strong>아직 등록된 내용이 없어요.</strong>
-      <span>재료를 추가하면 이곳에 표시됩니다.</span>
-    </div>
-  </template>
-
-  <script src="./app.js?v=5" defer></script>
+  <script src="./app.js?v=6" defer></script>
 </body>
 </html>

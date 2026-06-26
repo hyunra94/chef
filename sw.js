@@ -1,9 +1,9 @@
-const CACHE_NAME = "fridge-chef-cache-v5";
+const CACHE_NAME = "fridge-chef-cache-v6";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./style.css?v=5",
-  "./app.js?v=5",
+  "./style.css?v=6",
+  "./app.js?v=6",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png"

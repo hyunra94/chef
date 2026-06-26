@@ -1,28 +1,27 @@
 # 냉장고를 부탁해
 
-냉장고 속 재료를 로컬 저장소에 기록하고, 선택한 재료를 꼭 포함해서 레시피를 추천하는 PWA 웹앱입니다.
+로컬 저장소 기반 PWA 냉장고 재료 관리 + AI 레시피 추천 웹앱입니다.
 
-## 주요 기능
+## v6 수정 내용
 
-- PWA 지원
-- 로컬 저장소 기반 재료 DB
-- 재료 추가 / 삭제 / 수량 +, -
-- 입력일 자동 저장
-- 유통기한 선택 입력
-- 소스류 / 메인재료 / 서브재료 분류
-- 유통기한 임박 재료 표시
-- 이번 추천에 꼭 포함할 재료 직접 선택
-- 레시피 2~3개 추천
-- 레시피 저장
-- 별점 / 후기 입력
-- 로컬 데이터 내보내기 / 가져오기
-- Cloudflare Worker 기반 AI 추천 확장 준비
+- 홈 탭 제거
+- 첫 번째 탭을 `냉장고`로 변경
+- 재료 카드를 과한 요약형에서 분류별 DB 목록형으로 변경
+- 메인재료 / 서브재료 / 소스류 그룹화
+- 냉장고 탭에 `간단히 / 상세히` 보기 전환 추가
+- 재료 수정 기능 추가
+- 추천 탭에서 냉장고 재료를 간단히 보고 선택한 뒤 AI 추천 실행
+- 추천 결과는 레시피 히스토리에 자동 저장
+- 저장 탭을 `레시피` 탭으로 변경
+- 레시피 히스토리에서 메모, 별점 관리
+- 별점 필터 추가
+- 삭제 시 영구 삭제 대신 휴지통 이동
+- 휴지통 보기, 복원, 완전 삭제 기능 추가
+- GitHub Pages 캐시 갱신용 v6 적용
 
-## GitHub Pages 배포 주의
+## 배포 구조
 
-`hyunra94.github.io/chef`처럼 저장소가 하위 경로로 배포되는 경우에도 동작하도록 모든 경로를 `./` 상대 경로로 작성했습니다.
-
-업로드 시에는 `fridge-chef-app` 폴더 자체를 올리는 것이 아니라, 폴더 안의 파일들이 저장소 루트에 바로 있어야 합니다.
+GitHub Pages의 `/chef` 저장소 루트에 아래 파일이 바로 위치해야 합니다.
 
 ```text
 chef/
@@ -33,19 +32,20 @@ chef/
 ├─ sw.js
 ├─ worker.js
 └─ icons/
+   ├─ icon-192.png
+   └─ icon-512.png
 ```
 
-버튼이 계속 안 먹으면 이전 서비스워커 캐시가 남아 있을 수 있습니다.
-브라우저 개발자도구 → Application → Service Workers → Unregister 후 새로고침하거나, 사이트 데이터 삭제 후 다시 접속하세요.
+## AI 연결
 
-## AI Worker 사용
+설정 탭의 `AI Worker URL`에 Cloudflare Worker의 `/api/recipe` 주소를 입력하면 됩니다.
+Worker URL이 비어 있으면 로컬 추천 모드로 작동합니다.
 
-`worker.js`를 Cloudflare Worker에 배포하고 환경변수 `OPENAI_API_KEY`를 등록하세요.
-앱의 설정 탭에 아래 형식의 URL을 입력하면 실제 AI 추천으로 전환됩니다.
+## 캐시 문제 해결
+
+GitHub Pages에서 이전 화면이 계속 보이면 브라우저 개발자도구에서 Service Worker를 해제하거나 사이트 데이터를 삭제하세요.
 
 ```text
-https://your-worker.workers.dev/api/recipe
+Application → Service Workers → Unregister
+Application → Storage → Clear site data
 ```
-
-Worker로 전달되는 재료 데이터에는 `mustUse` 값이 포함됩니다.
-`mustUse: true`인 재료는 유통기한과 관계없이 추천 레시피에 반드시 포함하도록 프롬프트를 구성했습니다.
