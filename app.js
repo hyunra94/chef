@@ -1,6 +1,8 @@
-const STORAGE_KEY = "fridge-chef-v10";
-const LEGACY_KEYS = ["fridge-chef-v9", "fridge-chef-v8", "fridge-chef-v7", "fridge-chef-v6", "fridge-chef-v5", "fridge-chef-v4", "fridge-chef-v3", "fridge-chef-v2", "fridge-chef-v1"];
-const SETTINGS_KEY = "fridge-chef-settings-v1";
+const STORAGE_KEY = "fridge-chef-v12";
+const LEGACY_KEYS = ["fridge-chef-v11", "fridge-chef-v10", "fridge-chef-v9", "fridge-chef-v8", "fridge-chef-v7", "fridge-chef-v6", "fridge-chef-v5", "fridge-chef-v4", "fridge-chef-v3", "fridge-chef-v2", "fridge-chef-v1"];
+const SETTINGS_KEY = "fridge-chef-settings-v2";
+const LEGACY_SETTINGS_KEYS = ["fridge-chef-settings-v1"];
+const WORKER_DOMAIN = "hyunra94.workers.dev";
 
 const categoryLabels = {
   main: "메인재료",
@@ -13,6 +15,7 @@ const categoryOrder = ["main", "sub", "sauce"];
 const providerLabels = {
   openai: "ChatGPT",
   anthropic: "Claude",
+  claude: "Claude",
   gemini: "Gemini",
   all: "3개 모두 비교",
   local: "로컬 추천"
@@ -74,7 +77,7 @@ function init() {
   collectElements();
   registerServiceWorker();
   bindEvents();
-  if (elements.workerUrlInput) elements.workerUrlInput.value = settings.workerUrl || "";
+  if (elements.workerUrlInput) elements.workerUrlInput.value = settings.workerInput || shortenWorkerUrl(settings.workerUrl) || "";
   if (elements.aiProviderSelect) elements.aiProviderSelect.value = settings.aiProvider || "openai";
   renderAll();
 }
@@ -101,6 +104,7 @@ function collectElements() {
     recipeHistory: $("#recipeHistory"),
     recipeStatus: $("#recipeStatus"),
     recipeRecommendBtn: $("#recipeRecommendBtn"),
+    discardLatestBtn: $("#discardLatestBtn"),
     aiProviderSelect: $("#aiProviderSelect"),
     clearSelectedBtn: $("#clearSelectedBtn"),
     toggleConsumedBtn: $("#toggleConsumedBtn"),
@@ -146,6 +150,7 @@ function bindEvents() {
   });
 
   on(elements.recipeRecommendBtn, "click", generateRecipes);
+  on(elements.discardLatestBtn, "click", discardAllLatestRecipes);
   on(elements.aiProviderSelect, "change", (event) => {
     settings.aiProvider = event.target.value;
     saveSettings();
@@ -175,10 +180,13 @@ function bindEvents() {
   });
 
   on(elements.saveSettingsBtn, "click", () => {
-    settings.workerUrl = elements.workerUrlInput.value.trim();
+    const rawWorkerInput = elements.workerUrlInput.value.trim();
+    settings.workerInput = rawWorkerInput;
+    settings.workerUrl = normalizeWorkerRecipeUrl(rawWorkerInput);
     settings.aiProvider = elements.aiProviderSelect?.value || settings.aiProvider || "openai";
     saveSettings();
-    toast("설정을 저장했어요.");
+    if (elements.workerUrlInput) elements.workerUrlInput.value = settings.workerInput || shortenWorkerUrl(settings.workerUrl) || "";
+    toast(settings.workerUrl ? "AI Worker 설정을 저장했어요." : "AI Worker 설정을 비웠어요.");
   });
 
   on(elements.exportBtn, "click", exportData);
@@ -324,6 +332,8 @@ function handleDynamicClick(event) {
   if (action === "consume-ingredient") consumeIngredient(id);
   if (action === "restore-ingredient") restoreIngredient(id);
   if (action === "delete-ingredient") deleteIngredient(id);
+  if (action === "keep-recipe") keepLatestRecipe(id);
+  if (action === "discard-recipe") discardLatestRecipe(id);
   if (action === "rate-recipe") rateRecipe(id, Number(button.dataset.value));
   if (action === "trash-recipe") moveRecipeToTrash(id);
   if (action === "restore-recipe") restoreRecipe(id);
@@ -539,11 +549,10 @@ async function generateRecipes() {
       batchId
     }));
     state.latestRecipes = stamped.map(cloneData);
-    state.recipeHistory = [...stamped.map(cloneData), ...(state.recipeHistory || [])];
     saveState();
     elements.recipeStatus.textContent = useWorker
-      ? `${providerLabels[requestedProvider] || "AI"} 추천 결과입니다. 레시피 탭에 히스토리로 저장했어요.`
-      : "현재는 로컬 추천 모드입니다. 레시피 탭에 히스토리로 저장했어요.";
+      ? `${providerLabels[requestedProvider] || "AI"} 추천 결과입니다. 보관할 레시피만 골라 레시피 탭으로 넘겨주세요.`
+      : "현재는 로컬 추천 모드입니다. 보관할 레시피만 골라 레시피 탭으로 넘겨주세요.";
   } catch (error) {
     console.error(error);
     const fallback = makeLocalRecipes(payload).map((recipe) => normalizeRecipe({
@@ -558,9 +567,8 @@ async function generateRecipes() {
       batchId
     }));
     state.latestRecipes = fallback.map(cloneData);
-    state.recipeHistory = [...fallback.map(cloneData), ...(state.recipeHistory || [])];
     saveState();
-    elements.recipeStatus.textContent = `AI 연결에 실패해 로컬 추천으로 대신 보여드려요. ${error.message || ""}`.trim();
+    elements.recipeStatus.textContent = `AI 연결에 실패해 로컬 추천으로 대신 보여드려요. 보관할 레시피만 레시피 탭으로 이동합니다. ${error.message || ""}`.trim();
   }
 
   renderLatestRecipes();
@@ -690,6 +698,11 @@ function makeLocalRecipes(payload) {
 }
 
 function renderLatestRecipes() {
+  if (!elements.recipeResults) return;
+  elements.recipeResults.classList.toggle("compact-results", Boolean(state.latestRecipes.length));
+  if (elements.discardLatestBtn) {
+    elements.discardLatestBtn.hidden = !state.latestRecipes.length;
+  }
   if (!state.latestRecipes.length) {
     renderEmpty(elements.recipeResults, "아직 추천받은 레시피가 없어요.", "재료를 선택한 뒤 AI 추천 받기 버튼을 눌러보세요.");
     return;
@@ -697,11 +710,46 @@ function renderLatestRecipes() {
   elements.recipeResults.innerHTML = state.latestRecipes.map((recipe) => renderRecipeCard(recipe, "latest")).join("");
 }
 
+function discardAllLatestRecipes() {
+  if (!state.latestRecipes.length) return;
+  const ok = confirm("현재 추천 결과를 모두 폐기할까요? 레시피 탭에는 저장되지 않습니다.");
+  if (!ok) return;
+  state.latestRecipes = [];
+  saveState();
+  renderLatestRecipes();
+  toast("추천 결과를 폐기했어요.");
+}
+
+function keepLatestRecipe(id) {
+  const recipe = (state.latestRecipes || []).find((item) => item.id === id);
+  if (!recipe) return;
+  const stored = normalizeRecipe({
+    ...cloneData(recipe),
+    keptAt: new Date().toISOString(),
+    deletedAt: "",
+    memo: recipe.memo || "",
+    rating: Number(recipe.rating || 0)
+  });
+  state.recipeHistory = [stored, ...(state.recipeHistory || []).filter((item) => item.id !== id)];
+  state.latestRecipes = (state.latestRecipes || []).filter((item) => item.id !== id);
+  saveState();
+  renderLatestRecipes();
+  renderRecipeHistory();
+  toast("레시피 탭에 보관했어요.");
+}
+
+function discardLatestRecipe(id) {
+  state.latestRecipes = (state.latestRecipes || []).filter((item) => item.id !== id);
+  saveState();
+  renderLatestRecipes();
+  toast("추천 결과를 폐기했어요.");
+}
+
 function renderRecipeHistory() {
   const recipes = getVisibleRecipes();
   if (!recipes.length) {
     const title = showingTrash ? "휴지통이 비어 있어요." : "레시피 히스토리가 없어요.";
-    const subtitle = showingTrash ? "삭제한 레시피가 이곳에 표시됩니다." : "추천을 받으면 이곳에 자동으로 쌓입니다.";
+    const subtitle = showingTrash ? "삭제한 레시피가 이곳에 표시됩니다." : "추천 결과에서 보관을 누른 레시피만 이곳에 남습니다.";
     renderEmpty(elements.recipeHistory, title, subtitle);
     return;
   }
@@ -729,7 +777,46 @@ function matchRatingFilter(recipe) {
 
 function renderRecipeCard(recipe, source) {
   const isTrash = Boolean(recipe.deletedAt);
-  const canEdit = source !== "latest";
+
+  if (source === "latest") {
+    const ingredients = (recipe.usedIngredients || []).slice(0, 6);
+    const moreCount = Math.max(0, (recipe.usedIngredients || []).length - ingredients.length);
+    return `
+      <article class="recipe-card recipe-card-compact">
+        <div class="recipe-head">
+          <div>
+            <div class="recipe-title">${escapeHTML(recipe.title)}</div>
+            <div class="recipe-meta compact-meta">
+              <span class="category-badge provider-badge">${escapeHTML(getProviderLabel(recipe.provider))}</span>
+              <span class="category-badge">${escapeHTML(recipe.cookingTime || "30분")}</span>
+              <span class="category-badge">${escapeHTML(recipe.difficulty || "쉬움")}</span>
+            </div>
+          </div>
+        </div>
+
+        <p class="recipe-summary">${escapeHTML(recipe.summary || "")}</p>
+
+        <div class="ingredient-meta compact-ingredients">
+          <strong>사용</strong>
+          ${ingredients.map((name) => `<span class="category-badge">${escapeHTML(name)}</span>`).join("")}
+          ${moreCount ? `<span class="category-badge">+${moreCount}</span>` : ""}
+        </div>
+
+        <details class="recipe-detail-toggle">
+          <summary>조리 순서 보기</summary>
+          <ol class="recipe-steps">
+            ${(recipe.steps || []).map((step) => `<li>${escapeHTML(step)}</li>`).join("")}
+          </ol>
+        </details>
+
+        <div class="card-actions compact-actions">
+          <button class="tiny-btn success" type="button" data-action="keep-recipe" data-id="${recipe.id}">보관</button>
+          <button class="tiny-btn danger" type="button" data-action="discard-recipe" data-id="${recipe.id}">폐기</button>
+        </div>
+      </article>
+    `;
+  }
+
   const historyActions = isTrash
     ? `
       <button class="tiny-btn success" type="button" data-action="restore-recipe" data-id="${recipe.id}">복원</button>
@@ -746,7 +833,7 @@ function renderRecipeCard(recipe, source) {
             <span class="category-badge provider-badge">${escapeHTML(getProviderLabel(recipe.provider))}</span>
             <span class="category-badge">${escapeHTML(recipe.cookingTime || "30분")}</span>
             <span class="category-badge">${escapeHTML(recipe.difficulty || "쉬움")}</span>
-            ${recipe.createdAt ? `<span class="category-badge">${escapeHTML(formatDate(recipe.createdAt))}</span>` : ""}
+            ${recipe.keptAt ? `<span class="category-badge">보관 ${escapeHTML(formatDate(recipe.keptAt))}</span>` : recipe.createdAt ? `<span class="category-badge">${escapeHTML(formatDate(recipe.createdAt))}</span>` : ""}
           </div>
         </div>
       </div>
@@ -775,10 +862,10 @@ function renderRecipeCard(recipe, source) {
             <button class="star-btn ${Number(recipe.rating) >= value ? "active" : ""}" type="button" data-action="rate-recipe" data-id="${recipe.id}" data-value="${value}">★</button>
           `).join("")}
         </div>
-        ${canEdit ? `<textarea class="review-input" data-id="${recipe.id}" placeholder="메모를 남겨보세요. 예: 다음엔 고춧가루 추가">${escapeHTML(recipe.memo || recipe.review || "")}</textarea>` : ""}
+        <textarea class="review-input" data-id="${recipe.id}" placeholder="메모를 남겨보세요. 예: 다음엔 고춧가루 추가">${escapeHTML(recipe.memo || recipe.review || "")}</textarea>
       </div>
 
-      ${canEdit ? `<div class="card-actions">${historyActions}</div>` : ""}
+      <div class="card-actions">${historyActions}</div>
     </article>
   `;
 }
@@ -1000,7 +1087,8 @@ function normalizeRecipe(recipe) {
     rating: Number(recipe.rating || 0),
     memo: recipe.memo || recipe.review || "",
     createdAt: recipe.createdAt || recipe.savedAt || new Date().toISOString(),
-    deletedAt: recipe.deletedAt || ""
+    deletedAt: recipe.deletedAt || "",
+    keptAt: recipe.keptAt || ""
   };
 }
 
@@ -1020,15 +1108,45 @@ function saveState() {
 
 function loadSettings() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {};
+    const rawStored = localStorage.getItem(SETTINGS_KEY) || LEGACY_SETTINGS_KEYS.map((key) => localStorage.getItem(key)).find(Boolean) || "{}";
+    const parsed = JSON.parse(rawStored) || {};
+    const raw = parsed.workerInput || parsed.workerUrl || "";
+    const workerUrl = normalizeWorkerRecipeUrl(raw);
     return {
-      workerUrl: parsed.workerUrl || "",
+      workerInput: parsed.workerInput || shortenWorkerUrl(workerUrl) || raw,
+      workerUrl,
       aiProvider: providerLabels[parsed.aiProvider] ? parsed.aiProvider : "openai",
       lastIngredientCategory: categoryLabels[parsed.lastIngredientCategory] ? parsed.lastIngredientCategory : "sub"
     };
   } catch (error) {
-    return { workerUrl: "", aiProvider: "openai", lastIngredientCategory: "sub" };
+    return { workerInput: "", workerUrl: "", aiProvider: "openai", lastIngredientCategory: "sub" };
   }
+}
+
+function normalizeWorkerRecipeUrl(input) {
+  const value = String(input || "").trim();
+  if (!value) return "";
+
+  if (value.startsWith("http://") || value.startsWith("https://")) {
+    const clean = value.replace(/\/+$/, "");
+    return clean.endsWith("/api/recipe") ? clean : `${clean}/api/recipe`;
+  }
+
+  const workerName = value
+    .replace(/^https?:\/\//, "")
+    .replace(new RegExp(`\\.${WORKER_DOMAIN.replaceAll(".", "\\.")}.*$`), "")
+    .replace(/\.workers\.dev.*$/, "")
+    .replace(/\/.*$/, "")
+    .trim();
+
+  if (!workerName) return "";
+  return `https://${workerName}.${WORKER_DOMAIN}/api/recipe`;
+}
+
+function shortenWorkerUrl(url) {
+  const value = String(url || "").trim();
+  const match = value.match(/^https?:\/\/([^./]+)\.hyunra94\.workers\.dev(?:\/api\/recipe)?\/?$/i);
+  return match ? match[1] : value;
 }
 
 function saveSettings() {
@@ -1067,13 +1185,14 @@ async function importData(event) {
     }
     state = migrateState(data.state);
     settings = {
-      workerUrl: data.settings?.workerUrl || settings.workerUrl || "",
+      workerInput: data.settings?.workerInput || shortenWorkerUrl(data.settings?.workerUrl) || settings.workerInput || "",
+      workerUrl: normalizeWorkerRecipeUrl(data.settings?.workerInput || data.settings?.workerUrl || settings.workerUrl || ""),
       aiProvider: providerLabels[data.settings?.aiProvider] ? data.settings.aiProvider : (settings.aiProvider || "openai"),
       lastIngredientCategory: categoryLabels[data.settings?.lastIngredientCategory] ? data.settings.lastIngredientCategory : (settings.lastIngredientCategory || "sub")
     };
     saveState();
     saveSettings();
-    elements.workerUrlInput.value = settings.workerUrl || "";
+    elements.workerUrlInput.value = settings.workerInput || shortenWorkerUrl(settings.workerUrl) || "";
     if (elements.aiProviderSelect) elements.aiProviderSelect.value = settings.aiProvider || "openai";
     renderAll();
     toast("데이터를 가져왔어요.");
@@ -1108,6 +1227,6 @@ function registerServiceWorker() {
   if (location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") return;
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=10", { scope: "./" }).catch((error) => console.warn("Service worker registration failed", error));
+    navigator.serviceWorker.register("./sw.js?v=12", { scope: "./" }).catch((error) => console.warn("Service worker registration failed", error));
   });
 }
