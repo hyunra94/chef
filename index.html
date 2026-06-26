@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=2" />
+  <link rel="stylesheet" href="./style.css?v=5" />
   <title>냉장고를 부탁해</title>
 </head>
 <body>
@@ -63,7 +63,7 @@
               </div>
               <div class="stat-well surface-inset">
                 <strong id="useFirstCount">0</strong>
-                <span>우선소모</span>
+                <span>추천 선택</span>
               </div>
             </div>
           </article>
@@ -74,7 +74,7 @@
             <div>
               <span class="eyebrow">Cook Now</span>
               <h2>오늘의 추천 준비</h2>
-              <p class="muted">우선 쓰고 싶은 재료를 체크한 뒤 추천을 받아보세요.</p>
+              <p class="muted">이번 추천에 꼭 포함할 재료를 직접 체크한 뒤 추천을 받아보세요.</p>
             </div>
             <button class="btn btn-primary" id="homeRecommendBtn" type="button">추천 받기</button>
           </div>
@@ -112,7 +112,7 @@
             <div>
               <span class="eyebrow">AI Recipe</span>
               <h2>레시피 추천</h2>
-              <p class="muted">현재 재료 기준으로 2~3개의 레시피를 보여줍니다.</p>
+              <p class="muted">체크한 재료는 유통기한과 관계없이 꼭 포함해서 2~3개의 레시피를 보여줍니다.</p>
             </div>
             <button class="btn btn-primary" id="recipeRecommendBtn" type="button">다시 추천</button>
           </div>
@@ -243,10 +243,7 @@
         <input id="expiresInput" type="date" />
       </label>
 
-      <label class="check-row surface-inset-small">
-        <input id="useFirstInput" type="checkbox" />
-        <span>이번 추천에서 우선 사용</span>
-      </label>
+      <p class="muted mini-note">재료 저장 후 홈 또는 냉장고 화면에서 이번 추천에 포함할 재료를 따로 선택할 수 있어요.</p>
 
       <label class="soft-field surface-inset">
         <span>메모</span>
@@ -264,6 +261,6 @@
     </div>
   </template>
 
-  <script src="./app.js?v=2" defer></script>
+  <script src="./app.js?v=5" defer></script>
 </body>
 </html>

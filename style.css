@@ -855,3 +855,18 @@ main {
     flex: 1 0 auto;
   }
 }
+
+.check-chip.active {
+  color: white;
+  background: linear-gradient(135deg, var(--accent), var(--accent-light));
+  box-shadow: inset 3px 3px 6px rgb(71, 66, 180, 0.28), inset -3px -3px 6px rgb(255, 255, 255, 0.24);
+}
+
+.check-chip.active small {
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.mini-note {
+  margin: -4px 0 2px;
+  font-size: 0.9rem;
+}
