@@ -1,7 +1,7 @@
-const STORAGE_KEY = "fridge-chef-v12";
-const LEGACY_KEYS = ["fridge-chef-v11", "fridge-chef-v10", "fridge-chef-v9", "fridge-chef-v8", "fridge-chef-v7", "fridge-chef-v6", "fridge-chef-v5", "fridge-chef-v4", "fridge-chef-v3", "fridge-chef-v2", "fridge-chef-v1"];
-const SETTINGS_KEY = "fridge-chef-settings-v2";
-const LEGACY_SETTINGS_KEYS = ["fridge-chef-settings-v1"];
+const STORAGE_KEY = "fridge-chef-v13";
+const LEGACY_KEYS = ["fridge-chef-v12", "fridge-chef-v11", "fridge-chef-v10", "fridge-chef-v9", "fridge-chef-v8", "fridge-chef-v7", "fridge-chef-v6", "fridge-chef-v5", "fridge-chef-v4", "fridge-chef-v3", "fridge-chef-v2", "fridge-chef-v1"];
+const SETTINGS_KEY = "fridge-chef-settings-v3";
+const LEGACY_SETTINGS_KEYS = ["fridge-chef-settings-v2", "fridge-chef-settings-v1"];
 const WORKER_DOMAIN = "hyunra94.workers.dev";
 
 const categoryLabels = {
@@ -15,7 +15,6 @@ const categoryOrder = ["main", "sub", "sauce"];
 const providerLabels = {
   openai: "ChatGPT",
   anthropic: "Claude",
-  claude: "Claude",
   gemini: "Gemini",
   all: "3개 모두 비교",
   local: "로컬 추천"
@@ -63,6 +62,8 @@ let viewMode = "simple";
 let ratingFilter = "all";
 let showingTrash = false;
 let showingConsumed = false;
+let collapsedIngredientCategories = { sub: false, sauce: false, ...(settings.collapsedIngredientCategories || {}) };
+let collapsedRecommendCategories = { sub: false, sauce: false, ...(settings.collapsedRecommendCategories || {}) };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -104,7 +105,8 @@ function collectElements() {
     recipeHistory: $("#recipeHistory"),
     recipeStatus: $("#recipeStatus"),
     recipeRecommendBtn: $("#recipeRecommendBtn"),
-    discardLatestBtn: $("#discardLatestBtn"),
+    targetMenuInput: $("#targetMenuInput"),
+    purchaseModeSelect: $("#purchaseModeSelect"),
     aiProviderSelect: $("#aiProviderSelect"),
     clearSelectedBtn: $("#clearSelectedBtn"),
     toggleConsumedBtn: $("#toggleConsumedBtn"),
@@ -150,7 +152,6 @@ function bindEvents() {
   });
 
   on(elements.recipeRecommendBtn, "click", generateRecipes);
-  on(elements.discardLatestBtn, "click", discardAllLatestRecipes);
   on(elements.aiProviderSelect, "change", (event) => {
     settings.aiProvider = event.target.value;
     saveSettings();
@@ -325,15 +326,20 @@ function handleDynamicClick(event) {
   if (!button) return;
 
   const action = button.dataset.action;
+  if (!action) return;
+
+  if (action === "toggle-category-collapse") {
+    toggleCategoryCollapse(button.dataset.scope, button.dataset.category);
+    return;
+  }
+
   const id = button.dataset.id;
-  if (!action || !id) return;
+  if (!id) return;
 
   if (action === "edit-ingredient") openIngredientModal(id);
   if (action === "consume-ingredient") consumeIngredient(id);
   if (action === "restore-ingredient") restoreIngredient(id);
   if (action === "delete-ingredient") deleteIngredient(id);
-  if (action === "keep-recipe") keepLatestRecipe(id);
-  if (action === "discard-recipe") discardLatestRecipe(id);
   if (action === "rate-recipe") rateRecipe(id, Number(button.dataset.value));
   if (action === "trash-recipe") moveRecipeToTrash(id);
   if (action === "restore-recipe") restoreRecipe(id);
@@ -386,6 +392,23 @@ function toggleRecipeMustUse(id, explicitValue) {
   renderRecommendPicker();
 }
 
+function toggleCategoryCollapse(scope, category) {
+  if (!category || category === "main") return;
+
+  if (scope === "recommend") {
+    collapsedRecommendCategories[category] = !collapsedRecommendCategories[category];
+    settings.collapsedRecommendCategories = collapsedRecommendCategories;
+    saveSettings();
+    renderRecommendPicker();
+    return;
+  }
+
+  collapsedIngredientCategories[category] = !collapsedIngredientCategories[category];
+  settings.collapsedIngredientCategories = collapsedIngredientCategories;
+  saveSettings();
+  renderIngredients();
+}
+
 function deleteIngredient(id) {
   const item = state.ingredients.find((ingredient) => ingredient.id === id);
   if (!item) return;
@@ -413,6 +436,7 @@ function renderIngredients() {
   }
 
   elements.ingredientGroups.classList.toggle("detail-mode", viewMode === "detail");
+  elements.ingredientGroups.classList.toggle("simple-mode", viewMode !== "detail");
   elements.ingredientGroups.innerHTML = categoryOrder
     .map((category) => {
       const items = filtered.filter((item) => item.category === category);
@@ -434,11 +458,16 @@ function getFilteredIngredients() {
 }
 
 function renderIngredientGroup(category, items) {
+  const canCollapse = category === "sub" || category === "sauce";
+  const collapsed = canCollapse && Boolean(collapsedIngredientCategories[category]);
   return `
-    <section class="ingredient-group surface-inset">
+    <section class="ingredient-group surface-inset category-${category} ${collapsed ? "is-collapsed" : ""}" data-category="${category}">
       <div class="group-title-row">
         <h3>${escapeHTML(categoryLabels[category])}</h3>
-        <span class="group-count">${items.length}종</span>
+        <div class="group-header-actions">
+          <span class="group-count">${items.length}종</span>
+          ${canCollapse ? `<button class="tiny-btn group-toggle" type="button" data-action="toggle-category-collapse" data-scope="fridge" data-category="${category}">${collapsed ? "펼치기" : "접기"}</button>` : ""}
+        </div>
       </div>
       <div class="ingredient-list">
         ${items.map(renderIngredientRow).join("")}
@@ -498,10 +527,20 @@ function renderRecommendPicker() {
     .map((category) => {
       const items = activeIngredients.filter((item) => item.category === category).sort(sortIngredients);
       if (!items.length) return "";
+      const canCollapse = category === "sub" || category === "sauce";
+      const collapsed = canCollapse && Boolean(collapsedRecommendCategories[category]);
       return `
-        <div class="recommend-group">
-          <h4>${escapeHTML(categoryLabels[category])}</h4>
-          ${items.map((item) => renderRecommendChip(item, selected)).join("")}
+        <div class="recommend-group ${collapsed ? "is-collapsed" : ""}">
+          <div class="recommend-group-title">
+            <h4>${escapeHTML(categoryLabels[category])}</h4>
+            <div class="group-header-actions">
+              <span class="group-count">${items.length}종</span>
+              ${canCollapse ? `<button class="tiny-btn group-toggle" type="button" data-action="toggle-category-collapse" data-scope="recommend" data-category="${category}">${collapsed ? "펼치기" : "접기"}</button>` : ""}
+            </div>
+          </div>
+          <div class="recommend-chip-list">
+            ${items.map((item) => renderRecommendChip(item, selected)).join("")}
+          </div>
         </div>
       `;
     })
@@ -546,13 +585,17 @@ async function generateRecipes() {
       memo: recipe.memo || recipe.review || "",
       createdAt: new Date().toISOString(),
       deletedAt: "",
-      batchId
+      batchId,
+      targetMenu: payload.request.targetMenu || "",
+      purchaseMode: payload.request.purchaseMode || "fridge-only",
+      allowShopping: Boolean(payload.request.allowShopping)
     }));
     state.latestRecipes = stamped.map(cloneData);
+    state.recipeHistory = [...stamped.map(cloneData), ...(state.recipeHistory || [])];
     saveState();
     elements.recipeStatus.textContent = useWorker
-      ? `${providerLabels[requestedProvider] || "AI"} 추천 결과입니다. 보관할 레시피만 골라 레시피 탭으로 넘겨주세요.`
-      : "현재는 로컬 추천 모드입니다. 보관할 레시피만 골라 레시피 탭으로 넘겨주세요.";
+      ? `${providerLabels[requestedProvider] || "AI"} 추천 결과입니다. 레시피 탭에 히스토리로 저장했어요.`
+      : "현재는 로컬 추천 모드입니다. 레시피 탭에 히스토리로 저장했어요.";
   } catch (error) {
     console.error(error);
     const fallback = makeLocalRecipes(payload).map((recipe) => normalizeRecipe({
@@ -564,11 +607,15 @@ async function generateRecipes() {
       memo: "",
       createdAt: new Date().toISOString(),
       deletedAt: "",
-      batchId
+      batchId,
+      targetMenu: payload.request.targetMenu || "",
+      purchaseMode: payload.request.purchaseMode || "fridge-only",
+      allowShopping: Boolean(payload.request.allowShopping)
     }));
     state.latestRecipes = fallback.map(cloneData);
+    state.recipeHistory = [...fallback.map(cloneData), ...(state.recipeHistory || [])];
     saveState();
-    elements.recipeStatus.textContent = `AI 연결에 실패해 로컬 추천으로 대신 보여드려요. 보관할 레시피만 레시피 탭으로 이동합니다. ${error.message || ""}`.trim();
+    elements.recipeStatus.textContent = `AI 연결에 실패해 로컬 추천으로 대신 보여드려요. ${error.message || ""}`.trim();
   }
 
   renderLatestRecipes();
@@ -589,11 +636,17 @@ function buildRecipePayload() {
     memo: item.memo
   }));
 
+  const targetMenu = elements.targetMenuInput?.value.trim() || "";
+  const purchaseMode = elements.purchaseModeSelect?.value || "fridge-only";
+
   return {
     ingredients,
     request: {
       recipeCount: 3,
       mustUseIngredientIds: Array.from(selected),
+      targetMenu,
+      purchaseMode,
+      allowShopping: purchaseMode === "allow-shopping",
       style: $("#styleSelect").value,
       timeLimit: $("#timeSelect").value,
       difficulty: $("#difficultySelect").value,
@@ -641,24 +694,73 @@ function makeLocalRecipes(payload) {
   const subs = ingredients.filter((item) => item.category === "sub");
   const sauces = ingredients.filter((item) => item.category === "sauce");
 
-  const main = mustUse.find((item) => item.category === "main") || mains[0] || mustUse[0] || ingredients[0];
-  const sub1 = mustUse.find((item) => item.category === "sub" && item.id !== main.id) || subs[0] || ingredients.find((item) => item.id !== main.id) || main;
+  const targetMenu = String(payload.request.targetMenu || "").trim();
+  const allowShopping = Boolean(payload.request.allowShopping);
+  const purchaseText = allowShopping
+    ? "부족한 재료는 추가 구매 후보로 따로 적었어요."
+    : "추가 구매 없이 냉장고 재료만으로 만들 수 있게 구성했어요.";
+
+  const main = mustUse.find((item) => item.category === "main") || mains[0] || mustUse[0] || ingredients[0] || { name: "계란", category: "main" };
+  const sub1 = mustUse.find((item) => item.category === "sub" && item.id !== main.id) || subs[0] || ingredients.find((item) => item.id !== main.id) || { name: "양파", category: "sub" };
   const sub2 = subs.find((item) => item.id !== sub1.id) || mustUse.find((item) => item.id !== main.id && item.id !== sub1.id) || sub1;
-  const sauce = mustUse.find((item) => item.category === "sauce") || sauces[0] || { name: "소금", category: "sauce" };
+  const sauce = mustUse.find((item) => item.category === "sauce") || sauces[0] || { name: "간장", category: "sauce" };
   const sauce2 = sauces.find((item) => item.id !== sauce.id) || { name: "후추", category: "sauce" };
 
   const mustUseText = mustUse.length
     ? `선택한 재료 ${mustUse.map((item) => item.name).join(", ")}를 꼭 포함하도록 구성했어요.`
     : "선택 재료가 없어서 냉장고에 있는 재료를 기준으로 구성했어요.";
 
+  const shoppingCandidates = allowShopping ? ["필요한 고기/해산물", "부족한 채소", "전용 양념"] : [];
+
+  if (targetMenu) {
+    return [
+      {
+        title: allowShopping ? `${targetMenu} 맞춤 레시피` : `냉장고식 ${targetMenu}`,
+        summary: `${targetMenu}을/를 먹고 싶은 요청을 기준으로, ${main.name}, ${sub1.name}, ${sauce.name}를 활용해 구성했어요. ${mustUseText} ${purchaseText}`,
+        usedIngredients: uniqueNames([...mustUse, main, sub1, sub2, sauce]),
+        missingOptionalIngredients: shoppingCandidates,
+        cookingTime: payload.request.timeLimit === "15분 이내" ? "15분" : "30분",
+        difficulty: payload.request.difficulty === "보통" ? "보통" : "쉬움",
+        targetMenu,
+        purchaseMode: payload.request.purchaseMode,
+        allowShopping,
+        steps: [
+          `${targetMenu} 느낌이 나도록 ${main.name}와 ${sub1.name}를 먼저 손질합니다.`,
+          `${sauce.name}를 중심으로 간을 잡고, 냉장고에 있는 재료를 우선 넣습니다.`,
+          allowShopping ? "부족한 핵심 재료가 있다면 추가 구매 후보를 참고해 보완합니다." : "없는 재료는 생략하고, 현재 재료의 양념 밸런스를 맞춰 조리합니다.",
+          "중불에서 익힌 뒤 간을 보고 마무리합니다."
+        ]
+      },
+      {
+        title: `${targetMenu} 응용 한그릇`,
+        summary: `${targetMenu} 맛을 가볍게 살린 한 끼 메뉴입니다. ${purchaseText}`,
+        usedIngredients: uniqueNames([...mustUse, main, sub1, sauce, sauce2]),
+        missingOptionalIngredients: allowShopping ? ["밥 또는 면", "고명용 대파"] : [],
+        cookingTime: "25분",
+        difficulty: "쉬움",
+        targetMenu,
+        purchaseMode: payload.request.purchaseMode,
+        allowShopping,
+        steps: [
+          `${main.name}를 먹기 좋은 크기로 준비합니다.`,
+          `${sub1.name}와 함께 볶거나 끓여 기본 맛을 냅니다.`,
+          `${sauce.name}로 ${targetMenu}에 가까운 간을 맞춥니다.`,
+          "밥이나 면과 곁들이면 한 끼로 먹기 좋습니다."
+        ]
+      }
+    ];
+  }
+
   return [
     {
       title: `${main.name} ${sub1.name} 간단 볶음`,
-      summary: `${main.name}와 ${sub1.name}를 ${sauce.name}로 가볍게 볶는 ${payload.request.style} 메뉴입니다. ${mustUseText}`,
+      summary: `${main.name}와 ${sub1.name}를 ${sauce.name}로 가볍게 볶는 ${payload.request.style} 메뉴입니다. ${mustUseText} ${purchaseText}`,
       usedIngredients: uniqueNames([...mustUse, main, sub1, sauce, sauce2]),
-      missingOptionalIngredients: ["깨", "쪽파"],
+      missingOptionalIngredients: allowShopping ? ["깨", "쪽파"] : [],
       cookingTime: payload.request.timeLimit === "15분 이내" ? "12분" : "20분",
       difficulty: payload.request.difficulty === "보통" ? "보통" : "쉬움",
+      purchaseMode: payload.request.purchaseMode,
+      allowShopping,
       steps: [
         `${main.name}와 ${sub1.name}를 먹기 좋은 크기로 손질합니다.`,
         `팬을 예열한 뒤 ${main.name}를 먼저 익힙니다.`,
@@ -668,11 +770,13 @@ function makeLocalRecipes(payload) {
     },
     {
       title: `${main.name} ${sub2.name} 덮밥`,
-      summary: `밥 위에 올려 먹기 좋은 한 그릇 메뉴입니다. ${mustUseText}`,
+      summary: `밥 위에 올려 먹기 좋은 한 그릇 메뉴입니다. ${mustUseText} ${purchaseText}`,
       usedIngredients: uniqueNames([...mustUse, main, sub2, sauce]),
-      missingOptionalIngredients: ["밥", "계란"],
+      missingOptionalIngredients: allowShopping ? ["밥", "계란"] : [],
       cookingTime: "25분",
       difficulty: "쉬움",
+      purchaseMode: payload.request.purchaseMode,
+      allowShopping,
       steps: [
         `${main.name}를 한입 크기로 준비합니다.`,
         `${sub2.name}를 얇게 썰어 같이 볶습니다.`,
@@ -682,15 +786,17 @@ function makeLocalRecipes(payload) {
     },
     {
       title: `${sub1.name} ${main.name} 냉장고 정리전`,
-      summary: `남은 재료를 넓게 활용하는 정리형 메뉴입니다. ${mustUseText}`,
+      summary: `남은 재료를 넓게 활용하는 정리형 메뉴입니다. ${mustUseText} ${purchaseText}`,
       usedIngredients: uniqueNames([...mustUse, main, sub1, sub2, sauce]),
-      missingOptionalIngredients: ["부침가루", "계란"],
+      missingOptionalIngredients: allowShopping ? ["부침가루", "계란"] : [],
       cookingTime: "30분",
       difficulty: "보통",
+      purchaseMode: payload.request.purchaseMode,
+      allowShopping,
       steps: [
         `재료를 잘게 썰어 반죽에 섞습니다.`,
         `${sauce.name}를 약간 넣어 밑간합니다.`,
-        `팬에 기름을 두르고 얇게 펼쳐 굽니다.`,
+        `팬에 기름을 두르고 얇게 펼쳐 굽습니다.`,
         `앞뒤가 노릇해지면 꺼내 먹기 좋게 자릅니다.`
       ]
     }
@@ -698,11 +804,6 @@ function makeLocalRecipes(payload) {
 }
 
 function renderLatestRecipes() {
-  if (!elements.recipeResults) return;
-  elements.recipeResults.classList.toggle("compact-results", Boolean(state.latestRecipes.length));
-  if (elements.discardLatestBtn) {
-    elements.discardLatestBtn.hidden = !state.latestRecipes.length;
-  }
   if (!state.latestRecipes.length) {
     renderEmpty(elements.recipeResults, "아직 추천받은 레시피가 없어요.", "재료를 선택한 뒤 AI 추천 받기 버튼을 눌러보세요.");
     return;
@@ -710,46 +811,11 @@ function renderLatestRecipes() {
   elements.recipeResults.innerHTML = state.latestRecipes.map((recipe) => renderRecipeCard(recipe, "latest")).join("");
 }
 
-function discardAllLatestRecipes() {
-  if (!state.latestRecipes.length) return;
-  const ok = confirm("현재 추천 결과를 모두 폐기할까요? 레시피 탭에는 저장되지 않습니다.");
-  if (!ok) return;
-  state.latestRecipes = [];
-  saveState();
-  renderLatestRecipes();
-  toast("추천 결과를 폐기했어요.");
-}
-
-function keepLatestRecipe(id) {
-  const recipe = (state.latestRecipes || []).find((item) => item.id === id);
-  if (!recipe) return;
-  const stored = normalizeRecipe({
-    ...cloneData(recipe),
-    keptAt: new Date().toISOString(),
-    deletedAt: "",
-    memo: recipe.memo || "",
-    rating: Number(recipe.rating || 0)
-  });
-  state.recipeHistory = [stored, ...(state.recipeHistory || []).filter((item) => item.id !== id)];
-  state.latestRecipes = (state.latestRecipes || []).filter((item) => item.id !== id);
-  saveState();
-  renderLatestRecipes();
-  renderRecipeHistory();
-  toast("레시피 탭에 보관했어요.");
-}
-
-function discardLatestRecipe(id) {
-  state.latestRecipes = (state.latestRecipes || []).filter((item) => item.id !== id);
-  saveState();
-  renderLatestRecipes();
-  toast("추천 결과를 폐기했어요.");
-}
-
 function renderRecipeHistory() {
   const recipes = getVisibleRecipes();
   if (!recipes.length) {
     const title = showingTrash ? "휴지통이 비어 있어요." : "레시피 히스토리가 없어요.";
-    const subtitle = showingTrash ? "삭제한 레시피가 이곳에 표시됩니다." : "추천 결과에서 보관을 누른 레시피만 이곳에 남습니다.";
+    const subtitle = showingTrash ? "삭제한 레시피가 이곳에 표시됩니다." : "추천을 받으면 이곳에 자동으로 쌓입니다.";
     renderEmpty(elements.recipeHistory, title, subtitle);
     return;
   }
@@ -777,52 +843,15 @@ function matchRatingFilter(recipe) {
 
 function renderRecipeCard(recipe, source) {
   const isTrash = Boolean(recipe.deletedAt);
-
-  if (source === "latest") {
-    const ingredients = (recipe.usedIngredients || []).slice(0, 6);
-    const moreCount = Math.max(0, (recipe.usedIngredients || []).length - ingredients.length);
-    return `
-      <article class="recipe-card recipe-card-compact">
-        <div class="recipe-head">
-          <div>
-            <div class="recipe-title">${escapeHTML(recipe.title)}</div>
-            <div class="recipe-meta compact-meta">
-              <span class="category-badge provider-badge">${escapeHTML(getProviderLabel(recipe.provider))}</span>
-              <span class="category-badge">${escapeHTML(recipe.cookingTime || "30분")}</span>
-              <span class="category-badge">${escapeHTML(recipe.difficulty || "쉬움")}</span>
-            </div>
-          </div>
-        </div>
-
-        <p class="recipe-summary">${escapeHTML(recipe.summary || "")}</p>
-
-        <div class="ingredient-meta compact-ingredients">
-          <strong>사용</strong>
-          ${ingredients.map((name) => `<span class="category-badge">${escapeHTML(name)}</span>`).join("")}
-          ${moreCount ? `<span class="category-badge">+${moreCount}</span>` : ""}
-        </div>
-
-        <details class="recipe-detail-toggle">
-          <summary>조리 순서 보기</summary>
-          <ol class="recipe-steps">
-            ${(recipe.steps || []).map((step) => `<li>${escapeHTML(step)}</li>`).join("")}
-          </ol>
-        </details>
-
-        <div class="card-actions compact-actions">
-          <button class="tiny-btn success" type="button" data-action="keep-recipe" data-id="${recipe.id}">보관</button>
-          <button class="tiny-btn danger" type="button" data-action="discard-recipe" data-id="${recipe.id}">폐기</button>
-        </div>
-      </article>
-    `;
-  }
-
+  const canEdit = source !== "latest";
   const historyActions = isTrash
     ? `
       <button class="tiny-btn success" type="button" data-action="restore-recipe" data-id="${recipe.id}">복원</button>
       <button class="tiny-btn danger" type="button" data-action="delete-recipe-forever" data-id="${recipe.id}">완전 삭제</button>
     `
     : `<button class="tiny-btn danger" type="button" data-action="trash-recipe" data-id="${recipe.id}">휴지통</button>`;
+
+  const missingLabel = recipe.allowShopping ? "추가 구매 후보" : "있으면 좋음";
 
   return `
     <article class="recipe-card ${isTrash ? "deleted" : ""}">
@@ -833,7 +862,7 @@ function renderRecipeCard(recipe, source) {
             <span class="category-badge provider-badge">${escapeHTML(getProviderLabel(recipe.provider))}</span>
             <span class="category-badge">${escapeHTML(recipe.cookingTime || "30분")}</span>
             <span class="category-badge">${escapeHTML(recipe.difficulty || "쉬움")}</span>
-            ${recipe.keptAt ? `<span class="category-badge">보관 ${escapeHTML(formatDate(recipe.keptAt))}</span>` : recipe.createdAt ? `<span class="category-badge">${escapeHTML(formatDate(recipe.createdAt))}</span>` : ""}
+            ${recipe.createdAt ? `<span class="category-badge">${escapeHTML(formatDate(recipe.createdAt))}</span>` : ""}
           </div>
         </div>
       </div>
@@ -847,7 +876,7 @@ function renderRecipeCard(recipe, source) {
 
       ${recipe.missingOptionalIngredients?.length ? `
         <div class="ingredient-meta">
-          <strong>있으면 좋음</strong>
+          <strong>${escapeHTML(missingLabel)}</strong>
           ${recipe.missingOptionalIngredients.map((name) => `<span class="category-badge">${escapeHTML(name)}</span>`).join("")}
         </div>
       ` : ""}
@@ -862,10 +891,10 @@ function renderRecipeCard(recipe, source) {
             <button class="star-btn ${Number(recipe.rating) >= value ? "active" : ""}" type="button" data-action="rate-recipe" data-id="${recipe.id}" data-value="${value}">★</button>
           `).join("")}
         </div>
-        <textarea class="review-input" data-id="${recipe.id}" placeholder="메모를 남겨보세요. 예: 다음엔 고춧가루 추가">${escapeHTML(recipe.memo || recipe.review || "")}</textarea>
+        ${canEdit ? `<textarea class="review-input" data-id="${recipe.id}" placeholder="메모를 남겨보세요. 예: 다음엔 고춧가루 추가">${escapeHTML(recipe.memo || recipe.review || "")}</textarea>` : ""}
       </div>
 
-      <div class="card-actions">${historyActions}</div>
+      ${canEdit ? `<div class="card-actions">${historyActions}</div>` : ""}
     </article>
   `;
 }
@@ -1084,11 +1113,13 @@ function normalizeRecipe(recipe) {
     provider: recipe.provider || "local",
     model: recipe.model || "",
     batchId: recipe.batchId || "",
+    targetMenu: recipe.targetMenu || "",
+    purchaseMode: recipe.purchaseMode || "fridge-only",
+    allowShopping: Boolean(recipe.allowShopping),
     rating: Number(recipe.rating || 0),
     memo: recipe.memo || recipe.review || "",
     createdAt: recipe.createdAt || recipe.savedAt || new Date().toISOString(),
-    deletedAt: recipe.deletedAt || "",
-    keptAt: recipe.keptAt || ""
+    deletedAt: recipe.deletedAt || ""
   };
 }
 
@@ -1116,10 +1147,12 @@ function loadSettings() {
       workerInput: parsed.workerInput || shortenWorkerUrl(workerUrl) || raw,
       workerUrl,
       aiProvider: providerLabels[parsed.aiProvider] ? parsed.aiProvider : "openai",
-      lastIngredientCategory: categoryLabels[parsed.lastIngredientCategory] ? parsed.lastIngredientCategory : "sub"
+      lastIngredientCategory: categoryLabels[parsed.lastIngredientCategory] ? parsed.lastIngredientCategory : "sub",
+      collapsedIngredientCategories: parsed.collapsedIngredientCategories || {},
+      collapsedRecommendCategories: parsed.collapsedRecommendCategories || {}
     };
   } catch (error) {
-    return { workerInput: "", workerUrl: "", aiProvider: "openai", lastIngredientCategory: "sub" };
+    return { workerInput: "", workerUrl: "", aiProvider: "openai", lastIngredientCategory: "sub", collapsedIngredientCategories: {}, collapsedRecommendCategories: {} };
   }
 }
 
@@ -1188,8 +1221,12 @@ async function importData(event) {
       workerInput: data.settings?.workerInput || shortenWorkerUrl(data.settings?.workerUrl) || settings.workerInput || "",
       workerUrl: normalizeWorkerRecipeUrl(data.settings?.workerInput || data.settings?.workerUrl || settings.workerUrl || ""),
       aiProvider: providerLabels[data.settings?.aiProvider] ? data.settings.aiProvider : (settings.aiProvider || "openai"),
-      lastIngredientCategory: categoryLabels[data.settings?.lastIngredientCategory] ? data.settings.lastIngredientCategory : (settings.lastIngredientCategory || "sub")
+      lastIngredientCategory: categoryLabels[data.settings?.lastIngredientCategory] ? data.settings.lastIngredientCategory : (settings.lastIngredientCategory || "sub"),
+      collapsedIngredientCategories: data.settings?.collapsedIngredientCategories || settings.collapsedIngredientCategories || {},
+      collapsedRecommendCategories: data.settings?.collapsedRecommendCategories || settings.collapsedRecommendCategories || {}
     };
+    collapsedIngredientCategories = { sub: false, sauce: false, ...(settings.collapsedIngredientCategories || {}) };
+    collapsedRecommendCategories = { sub: false, sauce: false, ...(settings.collapsedRecommendCategories || {}) };
     saveState();
     saveSettings();
     elements.workerUrlInput.value = settings.workerInput || shortenWorkerUrl(settings.workerUrl) || "";
@@ -1227,6 +1264,6 @@ function registerServiceWorker() {
   if (location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") return;
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=12", { scope: "./" }).catch((error) => console.warn("Service worker registration failed", error));
+    navigator.serviceWorker.register("./sw.js?v=13", { scope: "./" }).catch((error) => console.warn("Service worker registration failed", error));
   });
 }

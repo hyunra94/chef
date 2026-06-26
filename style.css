@@ -387,6 +387,25 @@ main {
   margin-bottom: 14px;
 }
 
+.group-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.group-toggle {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+}
+
+.ingredient-group.is-collapsed .ingredient-list,
+.recommend-group.is-collapsed .recommend-chip-list {
+  display: none;
+}
+
 .group-title-row h3 {
   display: flex;
   align-items: center;
@@ -408,6 +427,16 @@ main {
 .ingredient-list {
   display: grid;
   gap: 10px;
+}
+
+/* 간단히 보기: 메인재료는 한 줄에 2개씩 표시 */
+.ingredient-groups:not(.detail-mode) .ingredient-group.category-main .ingredient-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* 상세히 보기: 세부 정보가 길어지므로 다시 1열 */
+.ingredient-groups.detail-mode .ingredient-list {
+  grid-template-columns: 1fr;
 }
 
 .ingredient-row {
@@ -571,6 +600,10 @@ main {
   margin-top: 22px;
 }
 
+.option-grid .menu-field {
+  grid-column: span 2;
+}
+
 .option-grid.compact-grid {
   grid-template-columns: 1.1fr 0.8fr 0.8fr;
   margin-top: 0;
@@ -626,6 +659,18 @@ main {
 }
 
 .recommend-group {
+  display: grid;
+  gap: 10px;
+}
+
+.recommend-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.recommend-chip-list {
   display: grid;
   gap: 10px;
 }
@@ -880,65 +925,6 @@ main {
   font-weight: 900;
 }
 
-
-/* v12: 추천 결과는 임시 보관함처럼 간결하게 표시 */
-.compact-results {
-  grid-template-columns: 1fr;
-  gap: 12px;
-}
-
-.recipe-card-compact {
-  min-height: auto;
-  padding: 16px;
-  display: grid;
-  gap: 10px;
-}
-
-.recipe-card-compact:hover {
-  transform: translateY(-1px);
-}
-
-.recipe-card-compact .recipe-summary {
-  margin-top: 0;
-}
-
-.compact-meta,
-.compact-ingredients {
-  margin-top: 8px;
-}
-
-.recipe-detail-toggle {
-  border-radius: 18px;
-  padding: 12px 14px;
-  background: var(--bg);
-  box-shadow: inset 3px 3px 6px var(--shadow-dark), inset -3px -3px 6px var(--shadow-light);
-}
-
-.recipe-detail-toggle summary {
-  cursor: pointer;
-  font-weight: 900;
-  color: var(--fg);
-  list-style-position: inside;
-}
-
-.recipe-detail-toggle .recipe-steps {
-  margin-top: 12px;
-}
-
-.compact-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.card-actions {
-  margin-top: 14px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
 .empty-card span {
   color: var(--muted);
   margin-top: 8px;
@@ -984,6 +970,10 @@ main {
     grid-template-columns: 1fr;
   }
 
+  .option-grid .menu-field {
+    grid-column: auto;
+  }
+
   .app-header {
     align-items: flex-start;
     flex-direction: column;
@@ -1006,6 +996,12 @@ main {
   }
 
   .ingredient-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 380px) {
+  .ingredient-groups:not(.detail-mode) .ingredient-group.category-main .ingredient-list {
     grid-template-columns: 1fr;
   }
 }

@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=12" />
+  <link rel="stylesheet" href="./style.css?v=13" />
   <title>냉장고를 부탁해</title>
 </head>
 <body data-current-tab="fridge">
@@ -81,6 +81,17 @@
           </div>
 
           <div class="option-grid">
+            <label class="soft-field surface-inset menu-field">
+              <span>먹고 싶은 메뉴</span>
+              <input id="targetMenuInput" type="text" placeholder="예: 닭볶음탕, 김치볶음밥" autocomplete="off" />
+            </label>
+            <label class="soft-field surface-inset">
+              <span>추가 구매 여부</span>
+              <select id="purchaseModeSelect">
+                <option value="fridge-only" selected>냉장고 재료만 사용</option>
+                <option value="allow-shopping">부족한 재료 추가 구매 가능</option>
+              </select>
+            </label>
             <label class="soft-field surface-inset">
               <span>요리 스타일</span>
               <select id="styleSelect">
@@ -136,9 +147,8 @@
               <div class="mini-title-row">
                 <div>
                   <h3>추천 결과</h3>
-                  <p class="muted">추천 결과는 임시로만 표시됩니다. 보관을 누른 레시피만 레시피 탭으로 이동합니다.</p>
+                  <p class="muted">추천 결과는 레시피 탭 히스토리에 자동으로 남습니다.</p>
                 </div>
-                <button class="tiny-btn danger" type="button" id="discardLatestBtn" hidden>전체 폐기</button>
               </div>
               <div id="recipeStatus" class="status-line"></div>
               <div id="recipeResults" class="recipe-grid empty-area"></div>
@@ -153,7 +163,7 @@
             <div>
               <span class="eyebrow">Recipe History</span>
               <h2>레시피</h2>
-              <p class="muted">보관한 레시피만 별점·메모와 함께 관리합니다.</p>
+              <p class="muted">추천받은 레시피 히스토리를 별점·메모와 함께 관리합니다.</p>
             </div>
             <div class="toolbar">
               <label class="soft-field small-select surface-inset">
@@ -250,6 +260,6 @@
     </form>
   </dialog>
 
-  <script src="./app.js?v=12" defer></script>
+  <script src="./app.js?v=13" defer></script>
 </body>
 </html>
