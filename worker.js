@@ -1,15 +1,18 @@
 const PROVIDERS = {
   openai: {
     label: "ChatGPT",
-    defaultModel: "gpt-4o-mini"
+    defaultModel: "gpt-4o-mini",
+    keyNames: ["OPENAI_API_KEY", "CHATGPT_API_KEY", "OPEN_API_KEY", "OPENAI_KEY"]
   },
   anthropic: {
     label: "Claude",
-    defaultModel: "claude-3-5-haiku-latest"
+    defaultModel: "claude-3-5-haiku-latest",
+    keyNames: ["CLAUDE_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_KEY"]
   },
   gemini: {
     label: "Gemini",
-    defaultModel: "gemini-2.5-flash"
+    defaultModel: "gemini-2.5-flash",
+    keyNames: ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_AI_API_KEY"]
   }
 };
 
@@ -17,6 +20,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const cors = corsHeaders(request);
+    let payload = null;
 
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: cors });
@@ -24,21 +28,7 @@ export default {
 
     try {
       if (url.pathname === "/" || url.pathname === "/api/health") {
-        return json({
-          ok: true,
-          service: "chef-ai-worker",
-          message: "냉장고를 부탁해 AI Worker 정상 작동 중",
-          keys: {
-            openai: Boolean(env.OPENAI_API_KEY),
-            claude: Boolean(env.CLAUDE_API_KEY || env.ANTHROPIC_API_KEY),
-            gemini: Boolean(env.GEMINI_API_KEY)
-          },
-          models: {
-            openai: env.OPENAI_MODEL || PROVIDERS.openai.defaultModel,
-            claude: env.CLAUDE_MODEL || env.ANTHROPIC_MODEL || PROVIDERS.anthropic.defaultModel,
-            gemini: env.GEMINI_MODEL || PROVIDERS.gemini.defaultModel
-          }
-        }, 200, cors);
+        return json(buildHealth(env), 200, cors);
       }
 
       if (url.pathname !== "/api/recipe") {
@@ -49,25 +39,29 @@ export default {
         return json({ ok: false, error: "POST only" }, 405, cors);
       }
 
-      const payload = await request.json();
-      const provider = normalizeProvider(payload?.request?.provider || payload?.provider || "openai");
+      payload = await request.json();
+      const requestedProvider = normalizeProvider(payload?.request?.provider || payload?.provider || "openai");
 
-      if (provider === "local") {
-        return json({ ok: true, provider: "local", recipes: makeLocalRecipes(payload) }, 200, cors);
+      if (requestedProvider === "local") {
+        return json({ ok: true, provider: "local", recipes: makeLocalRecipes(payload), warnings: [] }, 200, cors);
       }
 
-      const result = provider === "all"
+      const result = requestedProvider === "all"
         ? await requestAllProviders(payload, env)
-        : await requestSingleProviderWithFallback(provider, payload, env);
+        : await requestProviderWithFallback(requestedProvider, payload, env);
 
       return json({ ok: true, ...result }, 200, cors);
     } catch (error) {
+      const fallbackRecipes = makeLocalRecipes(payload || {});
       return json({
-        ok: false,
-        error: error?.message || "Recipe generation failed",
+        ok: true,
+        provider: "local",
+        fallbackFrom: "worker-error",
+        recipes: fallbackRecipes,
+        warnings: [serializeWarning("worker", "Worker", error)],
         friendlyError: makeFriendlyError(error),
-        recipes: []
-      }, 500, cors);
+        health: buildHealth(env)
+      }, 200, cors);
     }
   }
 };
@@ -93,9 +87,48 @@ function json(data, status = 200, extraHeaders = {}) {
   });
 }
 
+function buildHealth(env) {
+  return {
+    ok: true,
+    service: "chef-ai-worker",
+    message: "냉장고를 부탁해 AI Worker 정상 작동 중",
+    keys: {
+      openai: Boolean(getProviderKey("openai", env)),
+      claude: Boolean(getProviderKey("anthropic", env)),
+      gemini: Boolean(getProviderKey("gemini", env))
+    },
+    detectedKeyNames: {
+      openai: getDetectedKeyNames("openai", env),
+      claude: getDetectedKeyNames("anthropic", env),
+      gemini: getDetectedKeyNames("gemini", env)
+    },
+    models: {
+      openai: env.OPENAI_MODEL || PROVIDERS.openai.defaultModel,
+      claude: env.CLAUDE_MODEL || env.ANTHROPIC_MODEL || PROVIDERS.anthropic.defaultModel,
+      gemini: env.GEMINI_MODEL || PROVIDERS.gemini.defaultModel
+    }
+  };
+}
+
+function getProviderKey(provider, env) {
+  const config = PROVIDERS[provider];
+  if (!config) return "";
+  for (const name of config.keyNames) {
+    const value = env[name];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function getDetectedKeyNames(provider, env) {
+  const config = PROVIDERS[provider];
+  if (!config) return [];
+  return config.keyNames.filter((name) => typeof env[name] === "string" && env[name].trim());
+}
+
 function normalizeProvider(provider) {
   const value = String(provider || "").toLowerCase().trim();
-  if (["openai", "chatgpt", "gpt"].includes(value)) return "openai";
+  if (["openai", "chatgpt", "gpt", "챗지피티"].includes(value)) return "openai";
   if (["anthropic", "claude", "클로드", "클러드"].includes(value)) return "anthropic";
   if (["gemini", "google", "제미나이"].includes(value)) return "gemini";
   if (["all", "compare", "전체", "비교"].includes(value)) return "all";
@@ -104,122 +137,101 @@ function normalizeProvider(provider) {
 }
 
 function hasKey(provider, env) {
-  if (provider === "openai") return Boolean(env.OPENAI_API_KEY);
-  if (provider === "anthropic") return Boolean(env.CLAUDE_API_KEY || env.ANTHROPIC_API_KEY);
-  if (provider === "gemini") return Boolean(env.GEMINI_API_KEY);
-  return false;
+  return Boolean(getProviderKey(provider, env));
 }
 
 async function requestAllProviders(payload, env) {
   const targets = ["openai", "anthropic", "gemini"].filter((provider) => hasKey(provider, env));
 
   if (!targets.length) {
-    throw new Error("등록된 AI API 키가 없습니다. OPENAI_API_KEY, CLAUDE_API_KEY, GEMINI_API_KEY 중 하나 이상을 등록해주세요.");
+    return {
+      provider: "local",
+      fallbackFrom: "all",
+      recipes: makeLocalRecipes(payload),
+      warnings: [{ provider: "all", label: "AI", message: "등록된 AI API 키가 없어 로컬 추천으로 대신 표시했습니다." }]
+    };
   }
 
   const settled = await Promise.allSettled(targets.map((provider) => requestSingleProvider(provider, payload, env, 2)));
   const recipes = [];
-  const errors = [];
+  const warnings = [];
 
   settled.forEach((item, index) => {
     const provider = targets[index];
     if (item.status === "fulfilled") {
       recipes.push(...item.value.recipes);
     } else {
-      errors.push({
-        provider,
-        label: PROVIDERS[provider].label,
-        message: item.reason?.message || "요청 실패"
-      });
+      warnings.push(serializeWarning(provider, PROVIDERS[provider].label, item.reason));
     }
   });
 
   if (!recipes.length) {
-    const hasGeminiLocationError = errors.some((item) => item.provider === "gemini" && /User location is not supported/i.test(item.message));
-    if (hasGeminiLocationError) {
-      return {
-        provider: "local",
-        fallbackFrom: "all",
-        recipes: makeLocalRecipes(payload),
-        errors,
-        warnings: [
-          {
-            provider: "gemini",
-            label: PROVIDERS.gemini.label,
-            message: "Gemini API가 현재 Worker 실행 위치에서 제한되어 로컬 추천으로 대신 표시했습니다."
-          }
-        ]
-      };
-    }
-    throw new Error(errors.map((item) => `${item.label}: ${item.message}`).join(" / ") || "모든 AI 요청이 실패했습니다.");
+    return {
+      provider: "local",
+      fallbackFrom: "all",
+      recipes: makeLocalRecipes(payload),
+      warnings: warnings.length ? warnings : [{ provider: "all", label: "AI", message: "모든 AI 요청이 실패해 로컬 추천으로 대신 표시했습니다." }]
+    };
   }
 
   return {
     provider: "all",
     recipes: recipes.slice(0, 9),
-    errors
+    warnings
   };
 }
 
-async function requestSingleProviderWithFallback(provider, payload, env) {
-  try {
-    return await requestSingleProvider(provider, payload, env);
-  } catch (error) {
-    const message = error?.message || String(error);
+async function requestProviderWithFallback(provider, payload, env) {
+  const warnings = [];
+  const fallbackOrder = [provider, "openai", "anthropic", "gemini"]
+    .filter((item, index, arr) => arr.indexOf(item) === index)
+    .filter((item) => item !== "gemini" || provider === "gemini" || provider === "all");
 
-    if (provider === "gemini" && /User location is not supported/i.test(message)) {
-      const fallbackProviders = ["openai", "anthropic"].filter((item) => hasKey(item, env));
-
-      for (const fallbackProvider of fallbackProviders) {
-        try {
-          const result = await requestSingleProvider(fallbackProvider, payload, env);
-          return {
-            ...result,
-            provider: fallbackProvider,
-            fallbackFrom: "gemini",
-            warnings: [
-              {
-                provider: "gemini",
-                label: PROVIDERS.gemini.label,
-                message: "Gemini API가 현재 Worker 실행 위치에서 제한되어 다른 AI로 대신 추천했습니다."
-              }
-            ]
-          };
-        } catch (_) {}
-      }
-
-      return {
-        provider: "local",
-        fallbackFrom: "gemini",
-        recipes: makeLocalRecipes(payload),
-        warnings: [
-          {
-            provider: "gemini",
-            label: PROVIDERS.gemini.label,
-            message: "Gemini API가 현재 Worker 실행 위치에서 제한되어 로컬 추천으로 대신 표시했습니다."
-          }
-        ]
-      };
+  for (const candidate of fallbackOrder) {
+    if (!hasKey(candidate, env)) {
+      warnings.push({
+        provider: candidate,
+        label: PROVIDERS[candidate]?.label || candidate,
+        message: `${PROVIDERS[candidate]?.label || candidate} API 키가 Worker 환경변수에 없습니다.`
+      });
+      continue;
     }
 
-    throw error;
+    try {
+      const result = await requestSingleProvider(candidate, payload, env);
+      if (candidate !== provider) {
+        return {
+          ...result,
+          provider: candidate,
+          fallbackFrom: provider,
+          warnings
+        };
+      }
+      return { ...result, warnings };
+    } catch (error) {
+      warnings.push(serializeWarning(candidate, PROVIDERS[candidate].label, error));
+    }
   }
+
+  return {
+    provider: "local",
+    fallbackFrom: provider,
+    recipes: makeLocalRecipes(payload),
+    warnings
+  };
 }
 
 async function requestSingleProvider(provider, payload, env, countOverride) {
-  if (!hasKey(provider, env)) {
-    const keyName = provider === "anthropic" ? "CLAUDE_API_KEY" : provider === "openai" ? "OPENAI_API_KEY" : "GEMINI_API_KEY";
-    throw new Error(`${PROVIDERS[provider]?.label || provider} 키가 없습니다. ${keyName}를 Worker 환경변수에 등록해주세요.`);
-  }
-
   if (provider === "openai") return requestOpenAI(payload, env, countOverride);
   if (provider === "anthropic") return requestClaude(payload, env, countOverride);
   if (provider === "gemini") return requestGemini(payload, env, countOverride);
-
   throw new Error(`지원하지 않는 AI 제공자입니다: ${provider}`);
 }
 
 async function requestOpenAI(payload, env, countOverride) {
+  const apiKey = getProviderKey("openai", env);
+  if (!apiKey) throw new Error("OPENAI_API_KEY가 없습니다.");
+
   const model = env.OPENAI_MODEL || PROVIDERS.openai.defaultModel;
   const prompt = buildPrompt(payload, countOverride);
 
@@ -227,7 +239,7 @@ async function requestOpenAI(payload, env, countOverride) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${env.OPENAI_API_KEY}`
+      "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
       model,
@@ -246,7 +258,9 @@ async function requestOpenAI(payload, env, countOverride) {
 }
 
 async function requestClaude(payload, env, countOverride) {
-  const apiKey = env.CLAUDE_API_KEY || env.ANTHROPIC_API_KEY;
+  const apiKey = getProviderKey("anthropic", env);
+  if (!apiKey) throw new Error("CLAUDE_API_KEY가 없습니다.");
+
   const model = env.CLAUDE_MODEL || env.ANTHROPIC_MODEL || PROVIDERS.anthropic.defaultModel;
   const prompt = buildPrompt(payload, countOverride);
 
@@ -278,11 +292,14 @@ async function requestClaude(payload, env, countOverride) {
 }
 
 async function requestGemini(payload, env, countOverride) {
+  const apiKey = getProviderKey("gemini", env);
+  if (!apiKey) throw new Error("GEMINI_API_KEY가 없습니다.");
+
   const model = env.GEMINI_MODEL || PROVIDERS.gemini.defaultModel;
   const prompt = `${systemPrompt()}\n\n${buildPrompt(payload, countOverride)}`;
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -365,10 +382,27 @@ ${JSON.stringify(ingredients, null, 2)}
 `.trim();
 }
 
+function serializeWarning(provider, label, error) {
+  return {
+    provider,
+    label,
+    message: makeFriendlyError(error)
+  };
+}
+
 function makeFriendlyError(error) {
   const message = error?.message || String(error || "");
   if (/User location is not supported/i.test(message)) {
-    return "Gemini API가 현재 Worker 실행 위치에서 제한되었습니다. 추천 탭에서 ChatGPT 또는 Claude를 선택해 주세요.";
+    return "Gemini API가 현재 Worker 실행 위치에서 제한되었습니다.";
+  }
+  if (/401|invalid api key|incorrect api key|unauthorized/i.test(message)) {
+    return "API 키가 잘못되었거나 해당 프로젝트에서 사용할 수 없습니다.";
+  }
+  if (/403|permission|forbidden|billing|credit/i.test(message)) {
+    return "API 키 권한, 결제/크레딧, 모델 접근 권한을 확인해야 합니다.";
+  }
+  if (/429|quota|rate limit/i.test(message)) {
+    return "API 사용량 한도 또는 결제 한도에 걸렸습니다.";
   }
   return message || "AI 요청에 실패했습니다.";
 }
@@ -384,7 +418,7 @@ async function readJsonOrThrow(response, label) {
   }
 
   if (!response.ok) {
-    const message = data?.error?.message || data?.message || data?.raw || text;
+    const message = data?.error?.message || data?.error?.details || data?.message || data?.raw || text;
     throw new Error(`${label} API 오류: ${response.status} ${message}`);
   }
 
@@ -407,7 +441,7 @@ function packRecipes(provider, model, text, limit) {
       title: recipe.title || "추천 레시피",
       summary: recipe.summary || "",
       usedIngredients: ensureArray(recipe.usedIngredients),
-      missingOptionalIngredients: ensureArray(recipe.missingOptionalIngredients || recipe.missingIngredients),
+      missingOptionalIngredients: ensureArray(recipe.missingOptionalIngredients || recipe.missingIngredients || recipe.optionalIngredients),
       cookingTime: recipe.cookingTime || "",
       difficulty: recipe.difficulty || "쉬움",
       steps: ensureArray(recipe.steps),

@@ -345,6 +345,8 @@ function handleDynamicClick(event) {
   if (action === "restore-ingredient") restoreIngredient(id);
   if (action === "delete-ingredient") deleteIngredient(id);
   if (action === "rate-recipe") rateRecipe(id, Number(button.dataset.value));
+  if (action === "save-latest-recipe") saveLatestRecipe(id);
+  if (action === "discard-latest-recipe") discardLatestRecipe(id);
   if (action === "trash-recipe") moveRecipeToTrash(id);
   if (action === "restore-recipe") restoreRecipe(id);
   if (action === "delete-recipe-forever") deleteRecipeForever(id);
@@ -609,15 +611,14 @@ async function generateRecipes() {
       allowShopping: Boolean(payload.request.allowShopping)
     }));
     state.latestRecipes = stamped.map(cloneData);
-    state.recipeHistory = [...stamped.map(cloneData), ...(state.recipeHistory || [])];
     saveState();
     const actualProviders = [...new Set(stamped.map((recipe) => recipe.provider).filter(Boolean))];
     const usedFallback = useWorker && requestedProvider !== "all" && actualProviders.length && !actualProviders.includes(requestedProvider);
     elements.recipeStatus.textContent = useWorker
       ? usedFallback
-        ? `${providerLabels[requestedProvider] || "AI"} 호출이 제한되어 ${actualProviders.map((provider) => providerLabels[provider] || provider).join(", ")} 결과로 대신 저장했어요.`
-        : `${providerLabels[requestedProvider] || "AI"} 추천 결과입니다. 레시피 탭에 히스토리로 저장했어요.`
-      : "현재는 로컬 추천 모드입니다. 레시피 탭에 히스토리로 저장했어요.";
+        ? `${providerLabels[requestedProvider] || "AI"} 호출이 제한되어 ${actualProviders.map((provider) => providerLabels[provider] || provider).join(", ")} 결과로 대신 보여드려요. 마음에 드는 레시피만 보관하세요.`
+        : `${providerLabels[requestedProvider] || "AI"} 추천 결과입니다. 마음에 드는 레시피만 보관하세요.`
+      : "현재는 로컬 추천 모드입니다. 마음에 드는 레시피만 보관하세요.";
   } catch (error) {
     console.error(error);
     const fallback = makeLocalRecipes(payload).map((recipe) => normalizeRecipe({
@@ -635,7 +636,6 @@ async function generateRecipes() {
       allowShopping: Boolean(payload.request.allowShopping)
     }));
     state.latestRecipes = fallback.map(cloneData);
-    state.recipeHistory = [...fallback.map(cloneData), ...(state.recipeHistory || [])];
     saveState();
     elements.recipeStatus.textContent = formatAiFallbackMessage(error, requestedProvider);
   }
@@ -847,7 +847,7 @@ function makeLocalRecipes(payload) {
 
 function renderLatestRecipes() {
   if (!state.latestRecipes.length) {
-    renderEmpty(elements.recipeResults, "아직 추천받은 레시피가 없어요.", "재료를 선택한 뒤 AI 추천 받기 버튼을 눌러보세요.");
+    renderEmpty(elements.recipeResults, "아직 추천 결과가 없어요.", "재료를 선택한 뒤 AI 추천 받기 버튼을 눌러보세요.");
     return;
   }
   elements.recipeResults.innerHTML = state.latestRecipes.map((recipe) => renderRecipeCard(recipe, "latest")).join("");
@@ -857,7 +857,7 @@ function renderRecipeHistory() {
   const recipes = getVisibleRecipes();
   if (!recipes.length) {
     const title = showingTrash ? "휴지통이 비어 있어요." : "레시피 히스토리가 없어요.";
-    const subtitle = showingTrash ? "삭제한 레시피가 이곳에 표시됩니다." : "추천을 받으면 이곳에 자동으로 쌓입니다.";
+    const subtitle = showingTrash ? "삭제한 레시피가 이곳에 표시됩니다." : "추천 결과에서 보관한 레시피만 이곳에 표시됩니다.";
     renderEmpty(elements.recipeHistory, title, subtitle);
     return;
   }
@@ -885,13 +885,18 @@ function matchRatingFilter(recipe) {
 
 function renderRecipeCard(recipe, source) {
   const isTrash = Boolean(recipe.deletedAt);
-  const canEdit = source !== "latest";
+  const isLatest = source === "latest";
+  const canEdit = source === "history";
   const historyActions = isTrash
     ? `
       <button class="tiny-btn success" type="button" data-action="restore-recipe" data-id="${recipe.id}">복원</button>
       <button class="tiny-btn danger" type="button" data-action="delete-recipe-forever" data-id="${recipe.id}">완전 삭제</button>
     `
     : `<button class="tiny-btn danger" type="button" data-action="trash-recipe" data-id="${recipe.id}">휴지통</button>`;
+  const latestActions = `
+    <button class="tiny-btn success" type="button" data-action="save-latest-recipe" data-id="${recipe.id}">보관</button>
+    <button class="tiny-btn danger" type="button" data-action="discard-latest-recipe" data-id="${recipe.id}">폐기</button>
+  `;
 
   const missingLabel = recipe.allowShopping ? "추가 구매 후보" : "있으면 좋음";
 
@@ -927,18 +932,54 @@ function renderRecipeCard(recipe, source) {
         ${(recipe.steps || []).map((step) => `<li>${escapeHTML(step)}</li>`).join("")}
       </ol>
 
-      <div class="rating-box">
-        <div class="star-row" aria-label="별점">
-          ${[1, 2, 3, 4, 5].map((value) => `
-            <button class="star-btn ${Number(recipe.rating) >= value ? "active" : ""}" type="button" data-action="rate-recipe" data-id="${recipe.id}" data-value="${value}">★</button>
-          `).join("")}
+      ${canEdit ? `
+        <div class="rating-box">
+          <div class="star-row" aria-label="별점">
+            ${[1, 2, 3, 4, 5].map((value) => `
+              <button class="star-btn ${Number(recipe.rating) >= value ? "active" : ""}" type="button" data-action="rate-recipe" data-id="${recipe.id}" data-value="${value}">★</button>
+            `).join("")}
+          </div>
+          <textarea class="review-input" data-id="${recipe.id}" placeholder="메모를 남겨보세요. 예: 다음엔 고춧가루 추가">${escapeHTML(recipe.memo || recipe.review || "")}</textarea>
         </div>
-        ${canEdit ? `<textarea class="review-input" data-id="${recipe.id}" placeholder="메모를 남겨보세요. 예: 다음엔 고춧가루 추가">${escapeHTML(recipe.memo || recipe.review || "")}</textarea>` : ""}
-      </div>
+      ` : ""}
 
+      ${isLatest ? `<div class="card-actions">${latestActions}</div>` : ""}
       ${canEdit ? `<div class="card-actions">${historyActions}</div>` : ""}
     </article>
   `;
+}
+
+function saveLatestRecipe(id) {
+  const recipe = (state.latestRecipes || []).find((item) => item.id === id);
+  if (!recipe) return;
+
+  const now = new Date().toISOString();
+  const saved = normalizeRecipe({
+    ...recipe,
+    savedAt: now,
+    createdAt: recipe.createdAt || now,
+    deletedAt: "",
+    rating: Number(recipe.rating || 0),
+    memo: recipe.memo || ""
+  });
+
+  const exists = (state.recipeHistory || []).some((item) => item.id === saved.id);
+  if (!exists) {
+    state.recipeHistory = [cloneData(saved), ...(state.recipeHistory || [])];
+  }
+  state.latestRecipes = (state.latestRecipes || []).filter((item) => item.id !== id);
+  saveState();
+  renderLatestRecipes();
+  renderRecipeHistory();
+  toast("레시피를 보관했어요.");
+}
+
+function discardLatestRecipe(id) {
+  const recipe = (state.latestRecipes || []).find((item) => item.id === id);
+  state.latestRecipes = (state.latestRecipes || []).filter((item) => item.id !== id);
+  saveState();
+  renderLatestRecipes();
+  if (recipe) toast("추천 레시피를 폐기했어요.");
 }
 
 function rateRecipe(id, rating) {
