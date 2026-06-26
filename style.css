@@ -144,6 +144,22 @@ p {
   font-weight: 700;
 }
 
+.fridge-sticky-action {
+  position: sticky;
+  top: 92px;
+  z-index: 19;
+  width: fit-content;
+  margin: -8px 0 18px auto;
+  padding: 8px;
+  border-radius: 22px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+body:not([data-current-tab="fridge"]) .fridge-sticky-action {
+  display: none;
+}
+
 .eyebrow {
   display: inline-flex;
   align-items: center;
@@ -292,10 +308,21 @@ main {
 
 .fridge-controls {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto;
-  gap: 14px;
-  align-items: center;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  align-items: stretch;
   margin-top: 22px;
+}
+
+.control-stack {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.control-stack .segmented {
+  flex: 0 1 auto;
 }
 
 .search-well {
@@ -839,7 +866,6 @@ main {
 }
 
 @media (max-width: 760px) {
-  .app-header,
   .section-title-row,
   .fridge-controls,
   .option-grid,
@@ -877,6 +903,21 @@ main {
   .app-shell {
     width: min(100% - 22px, 1120px);
     padding-top: 14px;
+  }
+
+  .fridge-sticky-action {
+    top: 10px;
+    width: 100%;
+    margin: 12px 0 14px;
+    justify-content: stretch;
+  }
+
+  .fridge-sticky-action .btn {
+    width: 100%;
+  }
+
+  .control-stack {
+    gap: 8px;
   }
 
   .app-header,

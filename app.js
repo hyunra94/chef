@@ -1,5 +1,5 @@
-const STORAGE_KEY = "fridge-chef-v6";
-const LEGACY_KEYS = ["fridge-chef-v5", "fridge-chef-v4", "fridge-chef-v3", "fridge-chef-v2", "fridge-chef-v1"];
+const STORAGE_KEY = "fridge-chef-v7";
+const LEGACY_KEYS = ["fridge-chef-v6", "fridge-chef-v5", "fridge-chef-v4", "fridge-chef-v3", "fridge-chef-v2", "fridge-chef-v1"];
 const SETTINGS_KEY = "fridge-chef-settings-v1";
 
 const categoryLabels = {
@@ -80,7 +80,6 @@ function collectElements() {
     tabs: $$(".nav-btn"),
     panels: $$(".tab-panel"),
     headerAddBtn: $("#headerAddBtn"),
-    openIngredientBtn: $("#openIngredientBtn"),
     ingredientModal: $("#ingredientModal"),
     closeIngredientModal: $("#closeIngredientModal"),
     ingredientForm: $("#ingredientForm"),
@@ -115,7 +114,6 @@ function bindEvents() {
   });
 
   on(elements.headerAddBtn, "click", () => openIngredientModal());
-  on(elements.openIngredientBtn, "click", () => openIngredientModal());
   on(elements.closeIngredientModal, "click", closeIngredientModal);
   on(elements.toggleExpireBtn, "click", toggleExpireField);
   on(elements.ingredientForm, "submit", handleIngredientSubmit);
@@ -192,6 +190,7 @@ function on(element, eventName, handler) {
 }
 
 function switchTab(tabName) {
+  document.body.dataset.currentTab = tabName;
   elements.tabs.forEach((button) => button.classList.toggle("active", button.dataset.tab === tabName));
   elements.panels.forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${tabName}`));
   window.scrollTo({ top: 0, behavior: "smooth" });
